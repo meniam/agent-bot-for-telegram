@@ -2,7 +2,11 @@
 .env
 .data
 config.json
+config.yaml
+config.yml
 src/config/config.json
+src/config/config.yaml
+src/config/config.yml
 logs/
 uploads/
 commands/

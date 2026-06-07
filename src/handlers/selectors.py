@@ -14,30 +14,28 @@ from aiogram import Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from ..ui.markdown import send_md, to_html
 from .context import BotContext
 
-_MODE_VALUES: tuple[str, ...] = (
-    "default", "acceptEdits", "plan",
-)
 
-# (model_id, display_label). Empty id == back to SDK default.
-_MODELS: tuple[tuple[str, str], ...] = (
-    ("claude-opus-4-7",   "Opus 4.7"),
-    ("claude-sonnet-4-6", "Sonnet 4.6"),
-    ("claude-haiku-4-5",  "Haiku 4.5"),
-    ("",                  ""),  # default — label from `model_default_label`
-)
-_MODEL_IDS: frozenset[str] = frozenset(mid for mid, _ in _MODELS if mid)
+def _mode_label(ctx: BotContext, mode: str) -> str:
+    key = f"mode_btn_{mode}"
+    label = ctx.tr.t(key)
+    return mode if label == key else label
 
 
 def _mode_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
     current = ctx.agent.current_mode(chat_id)
     rows: list[list[InlineKeyboardButton]] = []
-    for m in _MODE_VALUES:
-        label = ctx.tr.t(f"mode_btn_{m}")
+    for m in ctx.agent.available_modes():
+        label = _mode_label(ctx, m)
         if m == current:
             label = f"● {label}"
         rows.append(
@@ -49,7 +47,7 @@ def _mode_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
 def _model_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
     current = ctx.agent.current_model(chat_id)  # None == SDK default
     rows: list[list[InlineKeyboardButton]] = []
-    for mid, label in _MODELS:
+    for mid, label in ctx.agent.available_models():
         text = label or ctx.tr.t("model_default_label")
         is_current = (mid == current) or (mid == "" and current is None)
         if is_current:
@@ -87,7 +85,10 @@ async def _apply_model(
         return
     display = model_id or ctx.tr.t("model_default_label")
     cl.info("model=%s", display)
-    await send_md(message, ctx.tr.t("model_set", model=display))
+    await send_md(
+        message,
+        ctx.tr.t("model_set", provider=ctx.agent.provider, model=display),
+    )
 
 
 async def _dispatch_choice_cb(
@@ -129,12 +130,13 @@ async def set_mode_cmd(
     **_: object,
 ) -> None:
     arg = (command.args or "").strip()
+    mode_values = ctx.agent.available_modes()
     if arg:
-        if arg not in _MODE_VALUES:
+        if arg not in mode_values:
             await send_md(
                 message,
                 ctx.tr.t(
-                    "mode_invalid", mode=arg, valid=", ".join(_MODE_VALUES)
+                    "mode_invalid", mode=arg, valid=", ".join(mode_values)
                 ),
             )
             return
@@ -156,20 +158,28 @@ async def set_model_cmd(
     **_: object,
 ) -> None:
     arg = (command.args or "").strip()
+    model_ids = frozenset(mid for mid, _ in ctx.agent.available_models() if mid)
     if arg:
         if arg.lower() == "default":
             await _apply_model(ctx, message, "", cl)
             return
-        if arg not in _MODEL_IDS:
+        if ctx.agent.provider not in {"codex", "pi"} and arg not in model_ids:
             await send_md(message, ctx.tr.t("model_invalid", model=arg))
             return
         await _apply_model(ctx, message, arg, cl)
         return
+    if ctx.agent.provider == "pi":
+        with contextlib.suppress(Exception):
+            await ctx.agent.get_server_info(message.chat.id)
     current = ctx.agent.current_model(message.chat.id) or ctx.tr.t(
         "model_default_label"
     )
     await message.answer(
-        to_html(ctx.tr.t("model_pick", current=current)),
+        to_html(
+            ctx.tr.t(
+                "model_pick", provider=ctx.agent.provider, current=current
+            )
+        ),
         parse_mode=ParseMode.HTML,
         reply_markup=_model_keyboard(ctx, message.chat.id),
     )
@@ -182,7 +192,7 @@ async def mode_callback(
     **_: object,
 ) -> None:
     await _dispatch_choice_cb(
-        callback, ctx, cl, frozenset(_MODE_VALUES), _apply_mode
+        callback, ctx, cl, frozenset(ctx.agent.available_modes()), _apply_mode
     )
 
 
@@ -193,7 +203,8 @@ async def model_callback(
     **_: object,
 ) -> None:
     # Empty value = default; non-empty must be in _MODEL_IDS.
-    await _dispatch_choice_cb(callback, ctx, cl, _MODEL_IDS, _apply_model)
+    model_ids = frozenset(mid for mid, _ in ctx.agent.available_models() if mid)
+    await _dispatch_choice_cb(callback, ctx, cl, model_ids, _apply_model)
 
 
 def register(dp: Dispatcher) -> None:

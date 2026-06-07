@@ -16,9 +16,9 @@ before changing behavior.
 
 ## Project Shape
 
-This is a multi-bot Telegram -> Claude Agent SDK bridge. One Python process can
-run several Telegram bots from `src/config/config.json`. Each bot has its own
-aiogram dispatcher, per-chat Claude SDK sessions, Telegram permission gate,
+This is a multi-bot Telegram -> agent-SDK bridge. One Python process can
+run several Telegram bots from `src/config/config.yaml`. Each bot has its own
+aiogram dispatcher, per-chat agent backend sessions, Telegram permission gate,
 draft streaming, logs, translator, and optional voice/upload/custom-command
 services.
 
@@ -27,7 +27,7 @@ Important directories:
 - `src/bot.py` - entrypoint, dependency wiring, bot supervision. Keep feature
   logic out of this file.
 - `src/config/` - `BotConfig` and config loader.
-- `src/infra/` - SDK session manager, command loader, logging, streaming,
+- `src/infra/` - SDK backend adapters, command loader, logging, streaming,
   permission gate.
 - `src/services/` - external service clients: Groq transcription and upload
   storage.
@@ -79,7 +79,7 @@ For behavior that unit tests do not cover, run the bot and inspect
 
 ## Configuration Invariants
 
-`src/config/config.json` is normally a dict of `<internal_name>: BotConfig`.
+`src/config/config.yaml` is normally a map of `<internal_name>: BotConfig`.
 The loader also accepts the legacy flat single-bot format and wraps it under
 `default`.
 
@@ -195,9 +195,9 @@ and `/new` disarm it.
 
 ## Sessions, Streaming, Logs
 
-`AgentSessionManager` keeps one live `ClaudeSDKClient` per chat, serializes
-turns with per-chat locks, mirrors selected mode/model state, and closes idle
-clients when `session_idle_ttl_sec > 0`.
+The active `AgentBackend` keeps one live SDK session/thread per chat,
+serializes turns with per-chat locks, mirrors selected mode/model state, and
+closes or drops idle sessions when `session_idle_ttl_sec > 0`.
 
 `/new` resets the session. `/stop` interrupts a running turn without taking the
 per-chat lock.
@@ -241,7 +241,7 @@ tool-status mirror. Validate those manually when touched.
 - Keep feature logic in focused `handlers/`, `ui/`, `infra/`, or `services/`
   modules.
 - Add or update focused tests when behavior changes.
-- Do not edit generated/runtime files: `src/config/config.json`, `logs/`,
+- Do not edit generated/runtime files: `src/config/config.yaml`, `logs/`,
   `uploads/`, `commands/`.
 - Do not create stray files in the repo root during normal runs.
 - Prefer existing project patterns over new abstractions.

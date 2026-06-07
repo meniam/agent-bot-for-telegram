@@ -40,6 +40,7 @@ async def reply_with_agent(
             )
             prompt = format_attachment_prompt(pending, prompt)
     await ctx.bot.send_chat_action(message.chat.id, "typing")
+    ctx.tool_mirror.begin_turn(message.chat.id)
     try:
         chunks = ctx.agent.ask_stream(message.chat.id, prompt)
         answer = await asyncio.wait_for(

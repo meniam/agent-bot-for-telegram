@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from aiogram.types import Message
 
 from ..i18n import Translator
-from ..infra.agent import AgentSessionManager
+from ..infra.agent import AgentBackend
 from ..infra.interactions import TelegramInteractionGate
 from .markdown import send_md
 
@@ -19,7 +19,7 @@ from .markdown import send_md
 class PlanRouter:
     def __init__(
         self,
-        agent: AgentSessionManager,
+        agent: AgentBackend,
         gate: TelegramInteractionGate,
         tr: Translator,
         glog: logging.Logger,

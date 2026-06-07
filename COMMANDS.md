@@ -5,14 +5,16 @@ Drop `*.md` files into a directory and the bot exposes each one as a Telegram bo
 ## Setup
 
 1. Pick a directory, e.g. `/etc/telegram-agent-bot/commands` or `./commands`.
-2. Add it to `src/config/config.json`:
-   ```json
-   "commands_dir": "/absolute/path/to/commands"
+2. Add it to `src/config/config.yaml`:
+   ```yaml
+   brain:
+     gateway:
+       commands_dir: /absolute/path/to/commands
    ```
 3. Drop one or more `*.md` files inside (see format below).
 4. Restart the bot. The startup log prints `loaded N custom command(s) from <path>` and the commands appear in the Telegram menu alongside the built-in ones (`/start`, `/new`, `/context`, `/plan`, `/cancel`, `/stop`, `/mode`, `/model`, `/mcp`, `/info`, `/whoami`, `/help`).
 
-`commands_dir: null` (or missing) disables the feature. A non-existent directory raises a startup error.
+Omitting `commands_dir` disables the feature. A non-existent directory raises a startup error.
 
 ## File format
 

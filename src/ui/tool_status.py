@@ -6,6 +6,7 @@ output is actually useful (Monitor, TaskOutput).
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot
@@ -47,14 +48,86 @@ _TOOL_PRIMARY_FIELD: dict[str, str] = {
     "ToolSearch": "query",
 }
 
+_TOOL_PATH_FIELDS = frozenset({
+    "file_path",
+    "notebook_path",
+})
 
-def _tool_brief(tool_name: str, tool_input: dict[str, Any]) -> str:
+_STATUS_LINE_MAX = 88
+
+_TOOL_EMOJI: dict[str, str] = {
+    "bash": "⌨️",
+    "bashoutput": "⌨️",
+    "killshell": "⏹",
+    "read": "📖",
+    "write": "✍️",
+    "edit": "✏️",
+    "multiedit": "✏️",
+    "notebookedit": "📓",
+    "grep": "🔎",
+    "glob": "🗂",
+    "webfetch": "🌐",
+    "websearch": "🔎",
+    "task": "🧩",
+    "skill": "🛠",
+    "monitor": "📡",
+    "taskoutput": "📋",
+    "toolsearch": "🧰",
+}
+
+
+def _one_line(text: str, limit: int = _STATUS_LINE_MAX) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def _tool_display(tool_name: str) -> str:
+    emoji = _TOOL_EMOJI.get(tool_name.replace("_", "").replace("-", "").lower(), "🔧")
+    return f"{emoji} {tool_name}"
+
+
+def _tool_input_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    tool_input = payload.get("tool_input")
+    if isinstance(tool_input, dict):
+        return tool_input
+    return payload
+
+
+def _format_path_brief(path: str, working_dir: Path | None) -> str:
+    raw = Path(path).expanduser()
+    if working_dir is not None:
+        if raw.is_absolute():
+            try:
+                rel = raw.resolve(strict=False).relative_to(working_dir)
+            except ValueError:
+                pass
+            else:
+                return "@" if str(rel) == "." else f"@/{rel}"
+        else:
+            return f"@/{raw}"
+
+    parts = [part for part in raw.parts if part != raw.anchor]
+    if len(parts) <= 3:
+        return str(raw)
+    return ".../" + "/".join(parts[-3:])
+
+
+def _tool_brief(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    working_dir: Path | None = None,
+) -> str:
     if tool_name == "TodoWrite":
         todos = tool_input.get("todos") or []
         return f"{len(todos)} todo(s)"
     field = _TOOL_PRIMARY_FIELD.get(tool_name)
     if field and field in tool_input:
-        return str(tool_input[field])[:300]
+        value = str(tool_input[field])
+        if field in _TOOL_PATH_FIELDS:
+            value = _format_path_brief(value, working_dir)
+        return value[:300]
     for k, v in tool_input.items():
         if k in {"content", "new_string", "old_string"}:
             continue
@@ -71,12 +144,51 @@ class ToolStatusMirror:
         bot_logs: BotLogs,
         glog: logging.Logger,
         bot_name: str,
+        working_dir: str | None = None,
     ) -> None:
         self._bot = bot
         self._tr = tr
         self._bot_logs = bot_logs
         self._glog = glog
         self._bot_name = bot_name
+        self._last_status_message: dict[int, int] = {}
+        self._working_dir = (
+            Path(working_dir).expanduser().resolve(strict=False)
+            if working_dir
+            else None
+        )
+
+    def begin_turn(self, chat_id: int) -> None:
+        """Start a fresh visible status line for the next agent turn."""
+        self._last_status_message.pop(chat_id, None)
+
+    async def _upsert_status(self, chat_id: int, body: str) -> None:
+        body = _one_line(body)
+        message_id = self._last_status_message.get(chat_id)
+        if message_id is not None:
+            try:
+                await self._bot.edit_message_text(
+                    body[:TG_LIMIT],
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    parse_mode=None,
+                )
+                return
+            except TelegramBadRequest as e:
+                if "message is not modified" in str(e).lower():
+                    return
+                log.debug("tool status edit failed; sending new status", exc_info=True)
+        try:
+            sent = await self._bot.send_message(
+                chat_id,
+                body[:TG_LIMIT],
+                parse_mode=None,
+                disable_notification=True,
+            )
+        except TelegramBadRequest:
+            log.exception("tool status send failed")
+            return
+        self._last_status_message[chat_id] = sent.message_id
 
     async def handle(
         self,
@@ -87,28 +199,22 @@ class ToolStatusMirror:
     ) -> None:
         cl = self._bot_logs.for_chat(chat_id)
         try:
+            tool_display = _tool_display(tool_name)
             if phase == "pre":
                 if tool_name in _GATE_HANDLED_TOOLS:
                     return
-                desc = _tool_brief(tool_name, payload)
+                tool_input = _tool_input_from_payload(payload)
+                desc = _tool_brief(tool_name, tool_input, self._working_dir)
                 if desc:
                     body = self._tr.t(
-                        "tool_status_pre", tool=tool_name, desc=desc
+                        "tool_status_pre", tool=tool_display, desc=desc
                     )
                 else:
                     body = self._tr.t(
-                        "tool_status_pre_no_desc", tool=tool_name
+                        "tool_status_pre_no_desc", tool=tool_display
                     )
                 cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
-                # Plain text — no MarkdownV2 escaping artefacts, lighter
-                # visual weight than `send_md_to_chat`.
-                try:
-                    await self._bot.send_message(
-                        chat_id, body[:TG_LIMIT], parse_mode=None,
-                        disable_notification=True,
-                    )
-                except TelegramBadRequest:
-                    log.exception("tool status pre send failed")
+                await self._upsert_status(chat_id, body)
             elif phase == "post":
                 response = payload.get("tool_response")
                 # Tool response shapes vary across tools; best-effort extract.
@@ -128,19 +234,13 @@ class ToolStatusMirror:
                 if preview:
                     body = self._tr.t(
                         "tool_status_post_with_preview",
-                        tool=tool_name,
+                        tool=tool_display,
                         preview=preview,
                     )
                 else:
-                    body = self._tr.t("tool_status_post", tool=tool_name)
+                    return
                 cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
-                try:
-                    await self._bot.send_message(
-                        chat_id, body[:TG_LIMIT], parse_mode=None,
-                        disable_notification=True,
-                    )
-                except TelegramBadRequest:
-                    log.exception("tool status post send failed")
+                await self._upsert_status(chat_id, body)
         except Exception:
             self._glog.exception(
                 "[%s] tool-event delivery failed", self._bot_name

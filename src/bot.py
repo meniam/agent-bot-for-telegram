@@ -8,7 +8,7 @@ Heavy lifting lives in submodules:
 
 `run_bot(cfg, http)` constructs the dependency graph for one bot, builds a
 `BotContext`, registers handlers, and starts long-polling. `_supervise`
-restarts a crashed bot with exponential backoff. `main` loads `config.json`
+restarts a crashed bot with exponential backoff. `main` loads the config file
 and gathers every bot under one `asyncio.gather`.
 """
 
@@ -29,7 +29,7 @@ from .config import load as load_config
 from .handlers import register_all
 from .handlers.context import BotContext
 from .i18n import Translator
-from .infra.agent import AgentSessionManager
+from .infra.agent_factory import create_agent_backend
 from .infra.commands import CommandDef, load_commands
 from .infra.interactions import TelegramInteractionGate
 from .infra.logs import BotLogs, setup_console
@@ -190,16 +190,20 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         chat_logger=bot_logs.for_chat,
     )
 
-    tool_mirror = ToolStatusMirror(bot, tr, bot_logs, glog, cfg.name)
+    tool_mirror = ToolStatusMirror(
+        bot, tr, bot_logs, glog, cfg.name, working_dir=cfg.working_dir
+    )
 
     add_dirs: list[str] = []
     if cfg.uploads_dir:
         add_dirs.append(cfg.uploads_dir)
-    agent = AgentSessionManager(
+    glog.info("[%s] agent_provider: %s", cfg.name, cfg.agent_provider)
+    if cfg.agent_model:
+        glog.info("[%s] agent_model: %s", cfg.name, cfg.agent_model)
+    agent = create_agent_backend(
+        cfg,
         on_permission=gate.can_use_tool,
         system_prompt=system_prompt,
-        cwd=cfg.working_dir,
-        idle_ttl_sec=cfg.session_idle_ttl_sec,
         add_dirs=add_dirs,
         on_tool_event=tool_mirror.handle,
     )
@@ -220,6 +224,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         agent=agent,
         gate=gate,
         streamer=streamer,
+        tool_mirror=tool_mirror,
         reaction_picker=reaction_picker,
         transcriber=transcriber,
         uploads=uploads,

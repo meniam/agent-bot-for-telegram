@@ -14,7 +14,7 @@ from aiogram.types import BotCommand
 
 from ..config import BotConfig
 from ..i18n import Translator
-from ..infra.agent import AgentSessionManager
+from ..infra.agent import AgentBackend
 from ..infra.interactions import TelegramInteractionGate
 from ..infra.logs import BotLogs
 from ..infra.streaming import DraftStreamer
@@ -23,6 +23,7 @@ from ..services.upload_store import UploadStore
 from ..ui.album import AlbumDebouncer
 from ..ui.plan_router import PlanRouter
 from ..ui.reactions import ReactionPicker
+from ..ui.tool_status import ToolStatusMirror
 
 
 @dataclass(slots=True, frozen=True)
@@ -32,9 +33,10 @@ class BotContext:
     tr: Translator
     glog: logging.Logger
     bot_logs: BotLogs
-    agent: AgentSessionManager
+    agent: AgentBackend
     gate: TelegramInteractionGate
     streamer: DraftStreamer
+    tool_mirror: ToolStatusMirror
     reaction_picker: ReactionPicker
     transcriber: GroqTranscriber | None
     uploads: UploadStore | None

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Git Commit'
+  short_description: 'Review, stage, and commit repository changes safely.'
+  default_prompt: 'Commit the current changes with a clear message.'

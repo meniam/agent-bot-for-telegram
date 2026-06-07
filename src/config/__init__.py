@@ -1,4 +1,4 @@
-"""Loads settings from config.json.
+"""Loads settings from config.yaml or config.json.
 
 Format: top-level is a `<internal_bot_name>: BotConfig` dict.
 Every bot can have its own token / working_dir / logs_dir.
@@ -7,20 +7,131 @@ Every bot can have its own token / working_dir / logs_dir.
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import yaml
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
-CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+CONFIG_DIR = Path(__file__).resolve().parent
+CONFIG_YAML_PATH = CONFIG_DIR / "config.yaml"
+CONFIG_YML_PATH = CONFIG_DIR / "config.yml"
+CONFIG_JSON_PATH = CONFIG_DIR / "config.json"
+CONFIG_PATH = CONFIG_YAML_PATH
+DEFAULT_CONFIG_PATHS = (CONFIG_YAML_PATH, CONFIG_YML_PATH, CONFIG_JSON_PATH)
+
+NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
+    "access": {
+        "allowed_for_all": "allowed_for_all",
+        "allowed_chat_ids": "allowed_chat_ids",
+        "blacklist_chat_ids": "blacklist_chat_ids",
+    },
+    "agent": {
+        "provider": "agent_provider",
+        "model": "agent_model",
+        "agent_provider": "agent_provider",
+        "agent_model": "agent_model",
+    },
+    "codex": {
+        "sandbox": "codex_sandbox",
+        "approval_mode": "codex_approval_mode",
+        "codex_sandbox": "codex_sandbox",
+        "codex_approval_mode": "codex_approval_mode",
+    },
+    "paths": {
+        "working_dir": "working_dir",
+        "logs_dir": "logs_dir",
+        "commands_dir": "commands_dir",
+    },
+    "pi": {
+        "cli_bin": "pi_cli_bin",
+        "tools_mode": "pi_tools_mode",
+        "session_persistence": "pi_session_persistence",
+        "pi_cli_bin": "pi_cli_bin",
+        "pi_tools_mode": "pi_tools_mode",
+        "pi_session_persistence": "pi_session_persistence",
+    },
+    "streaming": {
+        "draft_interval_sec": "draft_interval_sec",
+        "approval_timeout_sec": "approval_timeout_sec",
+        "agent_timeout_sec": "agent_timeout_sec",
+        "session_idle_ttl_sec": "session_idle_ttl_sec",
+        "chat_logger_capacity": "chat_logger_capacity",
+    },
+    "uploads": {
+        "dir": "uploads_dir",
+        "max_bytes": "upload_max_bytes",
+        "uploads_dir": "uploads_dir",
+        "upload_max_bytes": "upload_max_bytes",
+    },
+    "voice": {
+        "api_key": "groq_api_key",
+        "model": "groq_model",
+        "timeout_sec": "groq_timeout_sec",
+        "max_duration_sec": "voice_max_duration_sec",
+        "groq_api_key": "groq_api_key",
+        "groq_model": "groq_model",
+        "groq_timeout_sec": "groq_timeout_sec",
+        "voice_max_duration_sec": "voice_max_duration_sec",
+    },
+}
+
+GATEWAY_CONFIG_FIELDS: dict[str, str] = {
+    "telegram_bot_token": "telegram_bot_token",
+    "lang": "lang",
+    "logs_dir": "logs_dir",
+    "commands_dir": "commands_dir",
+    "allowed_for_all": "allowed_for_all",
+    "allowed_chat_ids": "allowed_chat_ids",
+    "blacklist_chat_ids": "blacklist_chat_ids",
+    "draft_interval_sec": "draft_interval_sec",
+    "approval_timeout_sec": "approval_timeout_sec",
+    "chat_logger_capacity": "chat_logger_capacity",
+}
+
+GATEWAY_ACCESS_FIELDS: dict[str, str] = {
+    "allowed_for_all": "allowed_for_all",
+    "allowed_chat_ids": "allowed_chat_ids",
+    "blacklist_chat_ids": "blacklist_chat_ids",
+}
+
+AGENT_CONFIG_FIELDS: dict[str, str] = {
+    "provider": "agent_provider",
+    "model": "agent_model",
+    "agent_provider": "agent_provider",
+    "agent_model": "agent_model",
+    "system_prompt": "system_prompt",
+    "working_dir": "working_dir",
+    "working_path": "working_dir",
+    "timeout_sec": "agent_timeout_sec",
+    "agent_timeout_sec": "agent_timeout_sec",
+    "session_idle_ttl_sec": "session_idle_ttl_sec",
+}
+
+PROVIDER_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
+    "claude": {},
+    "codex": NESTED_CONFIG_SECTIONS["codex"],
+    "pi": NESTED_CONFIG_SECTIONS["pi"],
+}
 
 
 class BotConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str  # internal name taken from the key in config.json
+    name: str  # internal name taken from the key in the config file
     telegram_bot_token: SecretStr
     # If None, bot.py falls back to translation key `default_system_prompt`.
     system_prompt: str | None = None
+    agent_provider: Literal["claude", "codex", "pi"] = "claude"
+    agent_model: str | None = None
+    codex_sandbox: Literal[
+        "read_only", "workspace_write", "danger_full_access"
+    ] = "workspace_write"
+    codex_approval_mode: Literal[
+        "default", "on_request", "never", "full_auto"
+    ] = "default"
+    pi_cli_bin: str | None = None
+    pi_tools_mode: Literal["default", "read_only", "no_tools"] = "default"
+    pi_session_persistence: bool = False
     draft_interval_sec: float = 0.2
     approval_timeout_sec: int = 300
     agent_timeout_sec: int = 600
@@ -62,7 +173,92 @@ class BotConfig(BaseModel):
         return str(v).lower() if v is not None else v
 
 
+def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    flat: dict[str, Any] = {}
+    nested: dict[str, dict[str, Any]] = {}
+
+    def set_field(target: str, value: Any, source: str) -> None:
+        if target in flat:
+            raise ValueError(
+                f"[{name}] config field {target} is set both directly and in section {source}"
+            )
+        flat[target] = value
+
+    def flatten_section(
+        source: str, values: dict[str, Any], section_map: dict[str, str]
+    ) -> None:
+        for nested_key, nested_value in values.items():
+            target = section_map.get(nested_key)
+            if target is None:
+                raise ValueError(
+                    f"[{name}] unknown config key in section {source}: {nested_key}"
+                )
+            set_field(target, nested_value, source)
+
+    for key, value in data.items():
+        if isinstance(value, dict):
+            nested[key] = value
+        else:
+            flat[key] = value
+
+    for section, values in nested.items():
+        if section == "gateway":
+            gateway_values: dict[str, Any] = {}
+            for gateway_key, gateway_value in values.items():
+                if gateway_key == "access":
+                    if not isinstance(gateway_value, dict):
+                        raise ValueError(
+                            f"[{name}] config section gateway.access must be an object"
+                        )
+                    flatten_section(
+                        "gateway.access", gateway_value, GATEWAY_ACCESS_FIELDS
+                    )
+                elif gateway_key == "voice":
+                    if not isinstance(gateway_value, dict):
+                        raise ValueError(
+                            f"[{name}] config section gateway.voice must be an object"
+                        )
+                    flatten_section("gateway.voice", gateway_value, NESTED_CONFIG_SECTIONS["voice"])
+                elif gateway_key == "uploads":
+                    if not isinstance(gateway_value, dict):
+                        raise ValueError(
+                            f"[{name}] config section gateway.uploads must be an object"
+                        )
+                    flatten_section(
+                        "gateway.uploads", gateway_value, NESTED_CONFIG_SECTIONS["uploads"]
+                    )
+                else:
+                    gateway_values[gateway_key] = gateway_value
+            flatten_section("gateway", gateway_values, GATEWAY_CONFIG_FIELDS)
+            continue
+
+        if section == "agent":
+            flatten_section("agent", values, AGENT_CONFIG_FIELDS)
+            continue
+
+        if section == "providers":
+            for provider, provider_values in values.items():
+                provider_map = PROVIDER_CONFIG_SECTIONS.get(provider)
+                if provider_map is None:
+                    raise ValueError(f"[{name}] unknown provider config section: {provider}")
+                if not isinstance(provider_values, dict):
+                    raise ValueError(
+                        f"[{name}] config section providers.{provider} must be an object"
+                    )
+                flatten_section(f"providers.{provider}", provider_values, provider_map)
+            continue
+
+        section_map = NESTED_CONFIG_SECTIONS.get(section)
+        if section_map is None:
+            raise ValueError(f"[{name}] unknown config section: {section}")
+        flatten_section(section, values, section_map)
+
+    return flat
+
+
 def _build(name: str, data: dict[str, Any]) -> BotConfig:
+    data = _flatten_nested_sections(name, data)
+
     raw_token = data.get("telegram_bot_token") or os.environ.get(
         f"TELEGRAM_BOT_TOKEN_{name.upper()}", ""
     )
@@ -137,6 +333,13 @@ def _build(name: str, data: dict[str, Any]) -> BotConfig:
         "name": name,
         "telegram_bot_token": raw_token,
         "system_prompt": data.get("system_prompt"),
+        "agent_provider": data.get("agent_provider", "claude"),
+        "agent_model": data.get("agent_model"),
+        "codex_sandbox": data.get("codex_sandbox", "workspace_write"),
+        "codex_approval_mode": data.get("codex_approval_mode", "default"),
+        "pi_cli_bin": data.get("pi_cli_bin"),
+        "pi_tools_mode": data.get("pi_tools_mode", "default"),
+        "pi_session_persistence": data.get("pi_session_persistence", False),
         "working_dir": working_dir,
         "logs_dir": logs_dir,
         "uploads_dir": uploads_dir,
@@ -165,24 +368,49 @@ def _build(name: str, data: dict[str, Any]) -> BotConfig:
     return BotConfig.model_validate(payload)
 
 
-def load(path: Path | str = CONFIG_PATH) -> dict[str, BotConfig]:
-    p = Path(path)
+def _default_config_path() -> Path:
+    for path in DEFAULT_CONFIG_PATHS:
+        if path.exists():
+            return path
+    return CONFIG_YAML_PATH
+
+
+def _read_config_data(path: Path) -> dict[str, Any]:
+    if path.suffix in {".yaml", ".yml"}:
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    elif path.suffix == ".json":
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        raise ValueError(f"{path} has unsupported config format")
+
+    if not isinstance(data, dict):
+        raise ValueError(f"{path.name} is empty or not an object")
+    return data
+
+
+def load(path: Path | str | None = None) -> dict[str, BotConfig]:
+    p = Path(path) if path is not None else _default_config_path()
     if not p.exists():
         raise FileNotFoundError(
-            f"{p} not found. Copy config.example.json → config.json and fill in telegram_bot_token."
+            f"{p} not found. Copy config.example.yaml → config.yaml and fill in telegram_bot_token."
         )
-    with p.open(encoding="utf-8") as f:
-        data = json.load(f)
+    data = _read_config_data(p)
 
     if not isinstance(data, dict) or not data:
-        raise ValueError("config.json is empty or not an object")
+        raise ValueError(f"{p.name} is empty or not an object")
 
     # Backward compat: if the top level has telegram_bot_token directly,
     # this is the flat (single-bot) format — wrap it under the name "default".
     if "telegram_bot_token" in data:
         return {"default": _build("default", data)}
 
-    bots = {name: _build(name, cfg) for name, cfg in data.items()}
+    bots = {}
+    for name, cfg in data.items():
+        if not isinstance(cfg, dict):
+            raise ValueError(f"[{name}] bot config must be an object")
+        bots[name] = _build(name, cfg)
     if not bots:
-        raise ValueError("config.json has no bot entries")
+        raise ValueError(f"{p.name} has no bot entries")
     return bots

@@ -1,6 +1,6 @@
 # CONFIG.md
 
-Complete reference for `src/config/config.json` fields. Schema is enforced by
+Complete reference for `src/config/config.yaml` fields. Schema is enforced by
 `BotConfig` (pydantic v2) in [src/config/__init__.py](src/config/__init__.py)
 with `extra="forbid"` — unknown keys cause a startup error.
 
@@ -11,22 +11,23 @@ field-by-field reference only.
 
 ## 1. File format
 
-`config.json` is a JSON object mapping `<internal_name>` → bot config:
+`config.yaml` is a YAML document mapping `<internal_name>` → bot config:
 
-```json
-{
-    "brain": {
-        "telegram_bot_token": "123456:ABC...",
-        "lang": "ru",
-        "allowed_chat_ids": [123456789]
-    },
-    "research": {
-        "telegram_bot_token": "789012:DEF...",
-        "lang": "en",
-        "allowed_for_all": true,
-        "blacklist_chat_ids": [555]
-    }
-}
+```yaml
+brain:
+  gateway:
+    telegram_bot_token: "123456:ABC..."
+    lang: ru
+    access:
+      allowed_chat_ids: [123456789]
+
+research:
+  gateway:
+    telegram_bot_token: "789012:DEF..."
+    lang: en
+    access:
+      allowed_for_all: true
+      blacklist_chat_ids: [555]
 ```
 
 Every top-level key launches one bot in the same process via
@@ -38,23 +39,34 @@ overrides (uppercased). It is **not** the Telegram `@username`.
 
 If the top-level has `telegram_bot_token` directly:
 
-```json
-{
-    "telegram_bot_token": "123456:ABC...",
-    "lang": "ru"
-}
+```yaml
+telegram_bot_token: "123456:ABC..."
+lang: ru
 ```
 
 it is wrapped under the name `default`. New configs should use the
 multi-bot form even with a single bot.
 
+### JSON compatibility
+
+The loader still accepts `config.json` with the previous object shape. When
+called without an explicit path, it tries `src/config/config.yaml`, then
+`src/config/config.yml`, then `src/config/config.json`.
+
+YAML configs may use `null`, but omitting optional fields is preferred.
+
+Recommended YAML sections are `gateway`, `agent`, and `providers`.
+Legacy flat fields and older nested sections (`access`, `paths`, `streaming`,
+`voice`, `uploads`, `codex`, `pi`) are still accepted for compatibility.
+If the same field is set both flat and nested, startup fails.
+
 ### File location
 
-Default path: `src/config/config.json`. The loader fails with
-`FileNotFoundError` if the file does not exist. Copy
-`src/config/config.example.json` → `src/config/config.json` to start.
+Default path: `src/config/config.yaml`. The loader fails with
+`FileNotFoundError` if neither supported config file exists. Copy
+`src/config/config.example.yaml` → `src/config/config.yaml` to start.
 
-`.gitignore` excludes `config.json` — keep tokens out of the repo.
+`.gitignore` excludes real config files — keep tokens out of the repo.
 
 ---
 
@@ -72,7 +84,7 @@ Tokens starting with `put-` are treated as placeholders. A placeholder
 `telegram_bot_token` raises a startup error; a placeholder `groq_api_key`
 silently disables voice transcription for that bot.
 
-No other fields support env overrides — change them in `config.json`.
+No other fields support env overrides — change them in the config file.
 
 ---
 
@@ -96,10 +108,68 @@ Each section: type, default, semantics, valid values, related fields.
 - **Type:** `str | null`.
 - **Default:** `null` → falls back to translation key
   `default_system_prompt` for the chosen `lang`.
-- **Semantics:** Claude's system prompt. Controls reply language and
+- **Semantics:** selected agent's system prompt. Controls reply language and
   personality. Overrides the i18n default when set.
 - **Tip:** Use this to set a per-bot personality / role. UI strings are
   controlled separately by `lang`.
+
+### `agent_provider`
+
+- **Type:** `"claude" | "codex" | "pi"`.
+- **Default:** `"claude"`.
+- **Semantics:** selects the agent backend for this Telegram bot. The
+  choice is per configured bot, not per chat.
+- **Claude:** uses `claude-agent-sdk` and the existing Claude permission /
+  plan flows.
+- **Codex:** uses `openai-codex` with per-chat Codex threads and the Codex
+  app-server event model where available.
+- **PI.dev:** uses `pi --mode rpc` with one JSONL subprocess per active chat.
+
+### `agent_model`
+
+- **Type:** `str | null`.
+- **Default:** `null` → SDK default model for the selected backend.
+- **Semantics:** initial model id for new chat sessions. `/model` can still
+  change the model for an active chat.
+- **Examples:** `claude-sonnet-4-6`, `gpt-5.4`, `gpt-5.3-codex`,
+  `openai/gpt-5.5`, `anthropic/claude-sonnet`.
+
+### `codex_sandbox`
+
+- **Type:** `"read_only" | "workspace_write" | "danger_full_access"`.
+- **Default:** `"workspace_write"`.
+- **Semantics:** Codex sandbox preset passed when starting a Codex thread.
+  Ignored by the Claude backend.
+
+### `codex_approval_mode`
+
+- **Type:** `"default" | "on_request" | "never" | "full_auto"`.
+- **Default:** `"default"`.
+- **Semantics:** initial Codex approval mode mirrored by `/mode`.
+  Ignored by the Claude backend.
+
+### `pi_cli_bin`
+
+- **Type:** `str | null`.
+- **Default:** `null` → find `pi` in `PATH`.
+- **Semantics:** PI.dev CLI executable used for `pi --mode rpc`.
+  Ignored by Claude and Codex.
+
+### `pi_tools_mode`
+
+- **Type:** `"default" | "read_only" | "no_tools"`.
+- **Default:** `"default"`.
+- **Semantics:** initial PI mode mirrored by `/mode`. The RPC protocol does
+  not currently expose native Telegram approval callbacks, so this is enforced
+  as agent instructions around tool use.
+
+### `pi_session_persistence`
+
+- **Type:** `bool`.
+- **Default:** `false`.
+- **Semantics:** when `false`, PI RPC starts with `--no-session` and `/new`
+  restarts the subprocess. When `true`, `/new` sends PI's `new_session`
+  command and lets PI persist sessions.
 
 ### `lang`
 
@@ -118,9 +188,9 @@ Each section: type, default, semantics, valid values, related fields.
 ### `working_dir`
 
 - **Type:** `str | null`.
-- **Default:** `null` → Claude uses the process cwd.
-- **Semantics:** forwarded to `ClaudeAgentOptions(cwd=...)`. Claude reads /
-  writes files relative to this directory and picks up
+- **Default:** `null` → the selected SDK uses its process cwd / default.
+- **Semantics:** forwarded to the selected agent backend. Agents read /
+  write files relative to this directory and Claude picks up
   `.claude/settings.json` and `.claude/settings.local.json` from here.
 - **Validation:** `~/...` is expanded. The directory must exist (a missing
   path raises a startup error: `[<name>] working_dir does not exist or is
@@ -167,7 +237,7 @@ Each section: type, default, semantics, valid values, related fields.
 
 - **Type:** `int`.
 - **Default:** `600`.
-- **Semantics:** hard upper bound on one Claude turn from query to final
+- **Semantics:** hard upper bound on one agent turn from query to final
   response. Wraps `streamer.stream(...)` inside `asyncio.wait_for`.
 - **Includes:** generation time + tool calls + user reaction time on
   permission prompts (since they pause the turn).
@@ -182,9 +252,9 @@ Each section: type, default, semantics, valid values, related fields.
 
 - **Type:** `int`.
 - **Default:** `86400` (24 hours).
-- **Semantics:** idle TTL for the per-chat `ClaudeSDKClient`. A background
-  GC task runs every `max(min(ttl/4, 60), 5)` seconds and closes clients
-  whose last activity is older than the TTL.
+- **Semantics:** idle TTL for the per-chat agent session. A background
+  GC task runs every `max(min(ttl/4, 60), 5)` seconds and closes or drops
+  sessions whose last activity is older than the TTL.
 - **`0`:** disables the GC entirely. Live clients survive until process
   restart, `/new`, or explicit `agent.reset(chat_id)`.
 - **On eviction:** the client's `__aexit__` is called; mode/model mirrors
@@ -301,14 +371,14 @@ Each section: type, default, semantics, valid values, related fields.
 
 ### `allowed_chat_ids`
 
-- **Type:** `tuple[int, ...]` (parsed from a JSON array of ints).
+- **Type:** `tuple[int, ...]` (parsed from an array of ints).
 - **Default:** `()` — empty.
 - **Semantics:** whitelist of allowed Telegram chat IDs. Ignored when
   `allowed_for_all=true`.
-- **Fail-closed:** missing key, `null`, and `[]` all mean **nobody is
+- **Fail-closed:** missing key, JSON `null`, and `[]` all mean **nobody is
   allowed**. Outsiders get a refusal containing their `chat_id` so they
   can forward it to the admin.
-- **Validation:** must be a JSON array of integers. Anything else raises
+- **Validation:** must be an array of integers. Anything else raises
   `[<name>] allowed_chat_ids must be null or a list of integers`.
 
 ### `blacklist_chat_ids`
@@ -331,7 +401,7 @@ Each section: type, default, semantics, valid values, related fields.
 
 | `allowed_for_all` | `allowed_chat_ids` | `blacklist_chat_ids` | Effect for sender X |
 |---|---|---|---|
-| `false` | `null` / missing / `[]` | any | Closed to everyone. Every message returns the refusal. |
+| `false` | JSON `null` / missing / `[]` | any | Closed to everyone. Every message returns the refusal. |
 | `false` | `[id, ...]` | `[]` | Whitelist. Only listed chats may use the bot. |
 | `false` | `[id, ...]` | `[X, ...]` | X denied even if whitelisted. |
 | `true` | anything | `[]` | Open to everyone. Logged as warning. |
@@ -341,7 +411,7 @@ Bootstrap when you don't know your `chat_id`:
 
 1. Leave `allowed_chat_ids` empty / missing, `allowed_for_all=false`.
 2. Start the bot, message it — the refusal text shows your `chat_id`.
-3. Set `"allowed_chat_ids": [<your_chat_id>]`, restart.
+3. Set `allowed_chat_ids = [<your_chat_id>]`, restart.
 
 ---
 
@@ -354,8 +424,7 @@ The loader enforces, at startup:
 - `working_dir` exists and is a directory.
 - `commands_dir` exists and is a directory.
 - `logs_dir` / `uploads_dir` are created if absent.
-- `allowed_chat_ids` / `blacklist_chat_ids` are JSON arrays of integers
-  (or null).
+- `allowed_chat_ids` / `blacklist_chat_ids` are arrays of integers.
 - `allowed_for_all` is a boolean.
 - `lang` is lowercased.
 
@@ -366,23 +435,22 @@ fail-fast on misconfiguration.
 
 ## 6. Minimum viable config
 
-```json
-{
-    "brain": {
-        "telegram_bot_token": "123456:ABC...",
-        "allowed_chat_ids": [123456789]
-    }
-}
+```yaml
+brain:
+  gateway:
+    telegram_bot_token: "123456:ABC..."
+    access:
+      allowed_chat_ids: [123456789]
 ```
 
 Everything else defaults safely:
 - `lang=ru` (Russian UI),
-- `system_prompt=null` (uses i18n default),
-- `working_dir=null` (process cwd),
-- `logs_dir=null` (console only),
-- `groq_api_key=null` (voice disabled),
-- `uploads_dir=null` (uploads disabled),
-- `commands_dir=null` (no custom commands),
+- `system_prompt` omitted (uses i18n default),
+- `working_dir` omitted (process cwd),
+- `logs_dir` omitted (console only),
+- `groq_api_key` omitted (voice disabled),
+- `uploads_dir` omitted (uploads disabled),
+- `commands_dir` omitted (no custom commands),
 - `agent_timeout_sec=600`, `approval_timeout_sec=300`,
 - `session_idle_ttl_sec=86400`.
 
@@ -390,41 +458,66 @@ Everything else defaults safely:
 
 ## 7. Full example
 
-```json
-{
-    "brain": {
-        "telegram_bot_token": "123456:ABC...",
-        "system_prompt": "You are a friendly Telegram assistant. Be concise.",
-        "lang": "en",
-        "allowed_chat_ids": [123456789, 987654321],
-        "blacklist_chat_ids": [],
-        "working_dir": "/home/brain/workdir",
-        "logs_dir": "/var/log/telegram-agent-bot",
-        "draft_interval_sec": 0.2,
-        "approval_timeout_sec": 300,
-        "agent_timeout_sec": 600,
-        "session_idle_ttl_sec": 86400,
-        "chat_logger_capacity": 256,
-        "groq_api_key": "gsk_...",
-        "groq_model": "whisper-large-v3-turbo",
-        "groq_timeout_sec": 60.0,
-        "voice_max_duration_sec": 600,
-        "uploads_dir": "/var/lib/telegram-agent-bot/uploads",
-        "upload_max_bytes": 20971520,
-        "commands_dir": "/etc/telegram-agent-bot/commands"
-    },
-    "public_demo": {
-        "telegram_bot_token": "789012:DEF...",
-        "system_prompt": "You are a polite public demo bot. Answer briefly.",
-        "lang": "en",
-        "allowed_for_all": true,
-        "blacklist_chat_ids": [555000111],
-        "working_dir": "/srv/public-demo",
-        "logs_dir": "/var/log/telegram-agent-bot",
-        "approval_timeout_sec": 60,
-        "agent_timeout_sec": 180
-    }
-}
+```yaml
+brain:
+  gateway:
+    telegram_bot_token: "123456:ABC..."
+    lang: en
+    logs_dir: /var/log/telegram-agent-bot
+    commands_dir: /etc/telegram-agent-bot/commands
+    draft_interval_sec: 0.2
+    approval_timeout_sec: 300
+    chat_logger_capacity: 256
+
+    access:
+      allowed_chat_ids: [123456789, 987654321]
+      blacklist_chat_ids: []
+
+    voice:
+      api_key: gsk_...
+      model: whisper-large-v3-turbo
+      timeout_sec: 60.0
+      max_duration_sec: 600
+
+    uploads:
+      dir: /var/lib/telegram-agent-bot/uploads
+      max_bytes: 20971520
+
+  agent:
+    provider: claude
+    model: null
+    working_path: /home/brain/workdir
+    system_prompt: |
+      You are a friendly Telegram assistant.
+      Be concise.
+    agent_timeout_sec: 600
+    session_idle_ttl_sec: 86400
+
+  providers:
+    claude: {}
+    codex:
+      sandbox: workspace_write
+      approval_mode: default
+    pi:
+      cli_bin: null
+      tools_mode: default
+      session_persistence: false
+
+public_demo:
+  gateway:
+    telegram_bot_token: "789012:DEF..."
+    lang: en
+    logs_dir: /var/log/telegram-agent-bot
+    approval_timeout_sec: 60
+
+    access:
+      allowed_for_all: true
+      blacklist_chat_ids: [555000111]
+
+  agent:
+    working_path: /srv/public-demo
+    system_prompt: "You are a polite public demo bot. Answer briefly."
+    agent_timeout_sec: 180
 ```
 
 The first bot is private (whitelist) with all features enabled. The

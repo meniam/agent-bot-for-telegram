@@ -1,0 +1,46 @@
+brain:
+  gateway:
+    telegram_bot_token: put-bot-token-from-BotFather-here
+    lang: ru
+    logs_dir: /var/log/telegram-agent-bot
+    commands_dir: /etc/telegram-agent-bot/commands
+    draft_interval_sec: 0.2
+    approval_timeout_sec: 300
+    chat_logger_capacity: 256
+
+    access:
+      allowed_for_all: false
+      allowed_chat_ids: []
+      blacklist_chat_ids: []
+
+    voice:
+      api_key: put-groq-api-key-here-or-set-GROQ_API_KEY_env
+      model: whisper-large-v3-turbo
+      max_duration_sec: 600
+      timeout_sec: 60.0
+
+    uploads:
+      dir: /var/lib/telegram-agent-bot/uploads
+      max_bytes: 20971520
+
+  agent:
+    provider: claude
+    model: null
+    working_path: /home/brain/workdir
+    system_prompt: |
+      You are a friendly assistant.
+      Be concise.
+    agent_timeout_sec: 600
+    session_idle_ttl_sec: 86400
+
+  providers:
+    claude: {}
+
+    codex:
+      sandbox: workspace_write
+      approval_mode: default
+
+    pi:
+      cli_bin: null
+      tools_mode: default
+      session_persistence: false
