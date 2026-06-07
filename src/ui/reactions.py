@@ -2,8 +2,8 @@
 
 Rules and the default emoji come from the per-language i18n file
 (`src/i18n/<lang>.json` keys: `reactions`, `default_reaction`).
-This keeps keyword patterns and emoji choices language-specific —
-so a Russian-language bot reacts to «спасибо», an English one to «thanks».
+This keeps keyword patterns and emoji choices language-specific, so an
+English-language bot can react to "thanks".
 
 Telegram restricts bots to a fixed set of free-emoji reactions; pick from
 that whitelist when adding new entries.

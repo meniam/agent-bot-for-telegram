@@ -17,8 +17,8 @@ def test_first_matching_rule_wins() -> None:
 
 
 def test_lowercases_haystack_for_matching() -> None:
-    p = _picker([("спасибо", "🙏")])
-    assert p.pick("СПАСИБО!") == "🙏"
+    p = _picker([("thanks", "🙏")])
+    assert p.pick("THANKS!") == "🙏"
 
 
 def test_returns_default_when_no_rule_matches() -> None:

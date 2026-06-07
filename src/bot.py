@@ -70,7 +70,7 @@ def _make_bot(cfg: BotConfig) -> Bot:
     return Bot(
         token=cfg.telegram_bot_token.get_secret_value(),
         default=DefaultBotProperties(
-            parse_mode=ParseMode.MARKDOWN_V2,
+            parse_mode=ParseMode.HTML,
             link_preview_is_disabled=True,
         ),
     )

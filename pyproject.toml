@@ -13,7 +13,6 @@ dependencies = [
     "claude-agent-sdk>=0.1.0,<0.2",
     "aiogram>=3.13,<4",
     "aiohttp>=3.9,<4",
-    "telegramify-markdown>=0.5.1,<2",
     "pydantic>=2.0,<3",
 ]
 

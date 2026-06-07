@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue.svg">
   <img alt="aiogram" src="https://img.shields.io/badge/aiogram-3.13%2B-2CA5E0.svg">
   <img alt="Claude" src="https://img.shields.io/badge/Claude-Agent%20SDK-D77757.svg">
 </p>
@@ -62,7 +62,7 @@ Drop `*.md` files into `commands_dir` to expose reusable workflows (`/recall`, `
 
 ## 🛠 Tech
 
-[aiogram 3](https://docs.aiogram.dev/) · [claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-python) · [pydantic 2](https://docs.pydantic.dev/) · [telegramify-markdown](https://pypi.org/project/telegramify-markdown/) · Groq Whisper.
+[aiogram 3](https://docs.aiogram.dev/) · [claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-python) · [pydantic 2](https://docs.pydantic.dev/) · [markdown-it-py](https://pypi.org/project/markdown-it-py/) · Groq Whisper.
 
 Full deps + dev tooling (`ruff`, `mypy`, `pyright`, `bandit`, `pip-audit`, `pytest`) declared in [pyproject.toml](pyproject.toml).
 

@@ -5,7 +5,7 @@ Python Telegram bot that talks to Claude through the Claude Agent SDK + aiogram.
 ## Requirements
 
 - **macOS / Linux** (Windows is not tested).
-- **Python 3.10+** (3.11 / 3.12 / 3.14 recommended).
+- **Python 3.11+** (matches `pyproject.toml`; 3.11 / 3.12 / 3.14 recommended).
 - **Node.js 18+** — needed once to install the Claude Code CLI and run `claude login`. The SDK ships a bundled `claude` for runtime use.
 - A **Telegram** account and a bot token from [@BotFather](https://t.me/BotFather).
 - A **Claude / Max / Team** subscription ([claude login](https://docs.anthropic.com/en/docs/claude-code/setup)) **or** an API key from [console.anthropic.com](https://console.anthropic.com/).
@@ -123,7 +123,7 @@ Open the bot in Telegram → `/start` → ask a question. The bot will:
 
 1. Set an emoji reaction on your message.
 2. Stream Claude's reply through `sendMessageDraft` (typing animation).
-3. Send the final response as a separate MarkdownV2 message.
+3. Send the final response as a separate Telegram HTML message.
 
 Commands (also visible in the Telegram `/` menu):
 
@@ -277,12 +277,12 @@ Sending any new message (text / voice / photo / document / sticker) while a quiz
 
 When Claude requests to leave plan mode (calls `ExitPlanMode`), the bot:
 
-- Renders the `plan` markdown to the chat (using the same MarkdownV2 chunker as regular replies — long plans are split into ≤ 4000-char messages; if MarkdownV2 fails, the original body is sent as plain text instead of the escaped fallback).
+- Renders the `plan` markdown to the chat using the same Telegram HTML sender as regular replies. Long plans are split into ≤ 4000-char messages; if Telegram rejects an HTML chunk, the original body is sent as plain text instead.
 - Posts a separate compact message holding two buttons: `✅ Approve` and `🚫 Reject`.
 - Resolves on whichever happens first:
-  - **Tap Approve** → `PermissionResultAllow()` — the SDK exits plan mode and lets Claude execute. The chat sees `▶️ План утверждён — агент начал работу.`.
-  - **Tap Reject** → `PermissionResultDeny(message="User rejected the plan.")`. The chat sees `🚫 План отклонён.`.
-  - **Type a freeform reply** while the buttons are on screen — counts as Reject *with feedback*. The text becomes the deny message and Claude reads it as the tool's failure reason, so it can revise the plan. The chat sees `🚫 План отклонён — отдаю фидбэк агенту.`.
+  - **Tap Approve** → `PermissionResultAllow()` — the SDK exits plan mode and lets Claude execute. The chat sees `▶️ Plan approved — agent started.`.
+  - **Tap Reject** → `PermissionResultDeny(message="User rejected the plan.")`. The chat sees `🚫 Plan rejected.`.
+  - **Type a freeform reply** while the buttons are on screen — counts as Reject *with feedback*. The text becomes the deny message and Claude reads it as the tool's failure reason, so it can revise the plan. The chat sees `🚫 Plan rejected — forwarding feedback to the agent.`.
 - On `approval_timeout_sec` expiry the prompt is dropped and Claude sees a generic rejection.
 
 Auto-cancel of armed `AskUserQuestion` quizzes is **not** wired here; freeform text *is* the response, so we let it through. All approve/reject decisions and the rendered plan length are written into `<chat_id>.log` as INFO entries.
@@ -362,7 +362,7 @@ agent-bot/
 │   ├── ui/                     # bot-side UX helpers (no aiogram handlers)
 │   │   ├── agent_reply.py      # react_to + reply_with_agent
 │   │   ├── album.py            # AlbumDebouncer (media_group_id coalescing)
-│   │   ├── markdown.py         # to_mdv2, send_md, audio_filename, format_quote, TG_LIMIT
+│   │   ├── markdown.py         # to_html, send_md, audio_filename, format_quote, TG_LIMIT
 │   │   ├── middleware.py       # AclMiddleware + deny_access
 │   │   ├── plan_router.py      # PlanRouter (per-chat /plan arm state + fire helper)
 │   │   ├── reactions.py        # ReactionPicker (keyword → emoji)

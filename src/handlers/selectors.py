@@ -16,7 +16,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from ..ui.markdown import send_md, to_mdv2
+from ..ui.markdown import send_md, to_html
 from .context import BotContext
 
 _MODE_VALUES: tuple[str, ...] = (
@@ -142,8 +142,8 @@ async def set_mode_cmd(
         return
     current = ctx.agent.current_mode(message.chat.id)
     await message.answer(
-        to_mdv2(ctx.tr.t("mode_pick", current=current)),
-        parse_mode=ParseMode.MARKDOWN_V2,
+        to_html(ctx.tr.t("mode_pick", current=current)),
+        parse_mode=ParseMode.HTML,
         reply_markup=_mode_keyboard(ctx, message.chat.id),
     )
 
@@ -169,8 +169,8 @@ async def set_model_cmd(
         "model_default_label"
     )
     await message.answer(
-        to_mdv2(ctx.tr.t("model_pick", current=current)),
-        parse_mode=ParseMode.MARKDOWN_V2,
+        to_html(ctx.tr.t("model_pick", current=current)),
+        parse_mode=ParseMode.HTML,
         reply_markup=_model_keyboard(ctx, message.chat.id),
     )
 

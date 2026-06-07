@@ -1,53 +1,142 @@
-"""Markdown → Telegram MarkdownV2 conversion, chunked send, audio filename.
+"""Markdown → Telegram HTML conversion, chunked send, audio filename.
 
 Pure helpers — no I/O state, no closures over per-bot config. Reusable
 across bots.
 """
 
+import html
 import logging
+import re
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message
-from telegramify_markdown import markdownify
+from markdown_it import MarkdownIt
+from markdown_it.tree import SyntaxTreeNode
 
 log = logging.getLogger(__name__)
 
 TG_LIMIT = 4000
 
-
-def _pad_after_code_blocks(text: str) -> str:
-    """Ensures a blank line after the closing ``` fence."""
-    lines = text.split("\n")
-    out: list[str] = []
-    in_block = False
-    for i, line in enumerate(lines):
-        out.append(line)
-        if line.lstrip().startswith("```"):
-            if in_block:
-                in_block = False
-                next_line = lines[i + 1] if i + 1 < len(lines) else ""
-                if next_line.strip():
-                    out.append("")
-            else:
-                in_block = True
-    return "\n".join(out)
+_md = MarkdownIt()
+_md.enable("strikethrough")
 
 
-def to_mdv2(text: str) -> str:
-    out: str = markdownify(_pad_after_code_blocks(text))
-    return out
+def _render(node: SyntaxTreeNode) -> str:
+    t = node.type
+    ch = node.children or []
+
+    if t == "root":
+        out = "".join(_render(c) for c in ch)
+        return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+    if t == "inline":
+        return "".join(_render(c) for c in ch)
+
+    if t == "text":
+        return html.escape(node.content)
+
+    if t in ("softbreak", "hardbreak"):
+        return "\n"
+
+    if t == "strong":
+        return f'<b>{"".join(_render(c) for c in ch)}</b>'
+
+    if t == "em":
+        return f'<i>{"".join(_render(c) for c in ch)}</i>'
+
+    if t == "s":
+        return f'<s>{"".join(_render(c) for c in ch)}</s>'
+
+    if t == "code_inline":
+        return f"<code>{html.escape(node.content)}</code>"
+
+    if t == "fence":
+        lang_raw = (node.info or "").split()[0] if (node.info or "").strip() else ""
+        code = html.escape(node.content.rstrip("\n"))
+        inner = (
+            f'<code class="language-{html.escape(lang_raw)}">{code}</code>'
+            if lang_raw
+            else code
+        )
+        return f"<pre>{inner}</pre>\n\n"
+
+    if t == "code_block":
+        return f"<pre>{html.escape(node.content.rstrip())}</pre>\n\n"
+
+    if t == "heading":
+        return f'<b>{"".join(_render(c) for c in ch)}</b>\n\n'
+
+    if t == "paragraph":
+        return f'{"".join(_render(c) for c in ch)}\n\n'
+
+    if t == "bullet_list":
+        return "".join(_render_list_item(c, prefix="•") for c in ch) + "\n"
+
+    if t == "ordered_list":
+        start = int(node.attrGet("start") or 1)
+        return (
+            "".join(
+                _render_list_item(c, prefix=f"{int(c.info) if c.info else start + i}.")
+                for i, c in enumerate(ch)
+            )
+            + "\n"
+        )
+
+    if t == "blockquote":
+        inner = "".join(_render(c) for c in ch).strip()
+        return f"<blockquote>{inner}</blockquote>\n\n"
+
+    if t == "link":
+        inner = "".join(_render(c) for c in ch)
+        url = html.escape(str(node.attrGet("href") or ""), quote=True)
+        return f'<a href="{url}">{inner}</a>'
+
+    if t == "image":
+        return html.escape(str(node.attrGet("alt") or ""))
+
+    if t == "hr":
+        return "\n"
+
+    if t in ("html_block", "html_inline"):
+        return html.escape(re.sub(r"<[^>]+>", "", node.content))
+
+    if ch:
+        return "".join(_render(c) for c in ch)
+    try:
+        return html.escape(node.content)
+    except AttributeError:
+        return ""
+
+
+def _render_list_item(node: SyntaxTreeNode, *, prefix: str) -> str:
+    content_parts: list[str] = []
+    nested: list[str] = []
+    for child in node.children or []:
+        if child.type in ("bullet_list", "ordered_list"):
+            nested.append(_render(child))
+        elif child.type == "paragraph":
+            content_parts.append("".join(_render(c) for c in child.children or []))
+        else:
+            content_parts.append(_render(child))
+    content = "".join(content_parts).strip()
+    return f"{prefix} {content}\n" + ("".join(nested) if nested else "")
+
+
+def to_html(text: str) -> str:
+    tokens = _md.parse(text)
+    tree = SyntaxTreeNode(tokens)
+    return _render(tree)
 
 
 async def send_md(message: Message, text: str) -> None:
-    """Sends Markdown as Telegram MarkdownV2 in chunks of ≤ TG_LIMIT.
+    """Sends Markdown as Telegram HTML in chunks of ≤ TG_LIMIT.
 
     Falls back to plain text for any chunk that the parser rejects.
     """
     bot = message.bot
     if bot is None:
-        # Should not happen — aiogram always binds a Bot to inbound messages.
         return
     await send_md_to_chat(bot, message.chat.id, text)
 
@@ -56,20 +145,19 @@ async def send_md_to_chat(bot: Bot, chat_id: int, text: str) -> None:
     """Chat-id-bound twin of `send_md` — used for bot-initiated messages
     (hooks, notifications) that have no inbound `Message` to reply to.
 
-    Tries MarkdownV2 first; on the first parse failure dumps the *original*
-    body in plain text. Falling back to the converted (escape-laden)
-    string would surface backslashes and `\\.` artifacts to the user.
+    Tries HTML first; on parse failure falls back to plain text so the
+    user never sees raw escape artifacts.
     """
-    converted = to_mdv2(text)
+    converted = to_html(text)
     sent_any = False
     for i in range(0, len(converted), TG_LIMIT):
         chunk = converted[i : i + TG_LIMIT]
         try:
-            await bot.send_message(chat_id, chunk, parse_mode=ParseMode.MARKDOWN_V2)
+            await bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
             sent_any = True
         except TelegramBadRequest:
             log.warning(
-                "send_md_to_chat: MarkdownV2 rejected for chat_id=%s — "
+                "send_md_to_chat: HTML rejected for chat_id=%s — "
                 "falling back to plain text (sent_any=%s)",
                 chat_id,
                 sent_any,
