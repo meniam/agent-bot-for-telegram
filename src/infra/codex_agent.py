@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .agent_types import ToolEventCallback
+from .agent_types import AgentEventStreamTimeout, AgentTurnReset, ToolEventCallback
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ CODEX_MODELS: tuple[tuple[str, str], ...] = (
     ("gpt-5.3-codex", "GPT-5.3 Codex"),
     ("", ""),
 )
+CODEX_RUN_TIMEOUT_SEC = 120.0
 
 
 @dataclass(slots=True)
@@ -223,17 +224,199 @@ class CodexAgentBackend:
             thread = await self._get_thread(chat_id)
             session = self._sessions[chat_id]
             run_prompt = self._prepare_prompt(prompt, session.mode)
-            turn = thread.run(run_prompt)
+            turn = await self._start_turn(thread, run_prompt)
             self._active_turns[chat_id] = turn
             try:
-                result = await turn if hasattr(turn, "__await__") else turn
+                await self._emit_lifecycle(
+                    chat_id,
+                    "pre",
+                    "prompt sent",
+                    mode=session.mode,
+                    model=session.model,
+                )
+                log.info(
+                    "Codex prompt sent chat_id=%s mode=%s model=%s",
+                    chat_id,
+                    session.mode,
+                    session.model or "default",
+                )
+                result = await self._wait_for_turn(chat_id, turn)
+                if chat_id not in self._sessions:
+                    raise AgentTurnReset("Codex session reset")
                 text = self._extract_final_response(result)
+                await self._emit_result_tool_events(chat_id, result)
+                await self._emit_lifecycle(
+                    chat_id,
+                    "post",
+                    "run completed",
+                    mode=session.mode,
+                    model=session.model,
+                )
                 if text:
                     yield text
-                await self._emit_result_tool_events(chat_id, result)
             finally:
                 self._active_turns.pop(chat_id, None)
                 session.last_used = time.monotonic()
+
+    async def _start_turn(self, thread: Any, prompt: str) -> Any:
+        turn_method = getattr(thread, "turn", None)
+        if turn_method is not None:
+            turn = turn_method(prompt)
+            return await turn if hasattr(turn, "__await__") else turn
+        return thread.run(prompt)
+
+    async def _wait_for_turn(self, chat_id: int, turn: Any) -> Any:
+        if hasattr(turn, "stream"):
+            return await self._wait_for_streamed_turn(chat_id, turn)
+        if not hasattr(turn, "__await__"):
+            return turn
+        try:
+            return await asyncio.wait_for(turn, timeout=CODEX_RUN_TIMEOUT_SEC)
+        except TimeoutError:
+            msg = (
+                "Codex run timed out after "
+                f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"
+            )
+            log.warning("%s (chat_id=%s)", msg, chat_id)
+            session = self._sessions.get(chat_id)
+            await self._emit_lifecycle(
+                chat_id,
+                "post",
+                msg,
+                mode=session.mode if session else self._approval_mode,
+                model=session.model if session else self._initial_model,
+            )
+            await self._cancel_turn(turn)
+            raise AgentEventStreamTimeout(msg) from None
+
+    async def _wait_for_streamed_turn(self, chat_id: int, turn: Any) -> dict[str, Any]:
+        stream = turn.stream()
+        items: list[dict[str, Any]] = []
+        completed: dict[str, Any] | None = None
+        usage: dict[str, Any] | None = None
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        stream.__anext__(),
+                        timeout=CODEX_RUN_TIMEOUT_SEC,
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    await self._handle_turn_timeout(chat_id, turn)
+
+                await self._handle_sdk_notification(chat_id, event)
+                payload = self._to_plain(getattr(event, "payload", None))
+                method = str(getattr(event, "method", ""))
+                if (
+                    method == "item/completed"
+                    and isinstance(payload, dict)
+                    and isinstance(payload.get("item"), dict)
+                ):
+                    items.append(payload["item"])
+                elif (
+                    method == "thread/tokenUsage/updated"
+                    and isinstance(payload, dict)
+                    and isinstance(payload.get("token_usage"), dict)
+                ):
+                    usage = payload["token_usage"]
+                elif (
+                    method == "turn/completed"
+                    and isinstance(payload, dict)
+                    and isinstance(payload.get("turn"), dict)
+                ):
+                    completed = payload["turn"]
+                    break
+                if chat_id not in self._sessions:
+                    raise AgentTurnReset("Codex session reset")
+        finally:
+            closer = getattr(stream, "aclose", None)
+            if closer is not None:
+                with contextlib.suppress(Exception):
+                    await closer()
+
+        if completed is not None:
+            error = completed.get("error")
+            if completed.get("status") == "failed":
+                if isinstance(error, dict) and isinstance(error.get("message"), str):
+                    raise RuntimeError(error["message"])
+                raise RuntimeError("turn failed with status failed")
+        return {
+            "final_response": self._final_assistant_response_from_items(items),
+            "items": items,
+            "usage": usage,
+            "turn": completed,
+        }
+
+    async def _handle_turn_timeout(self, chat_id: int, turn: Any) -> None:
+        msg = (
+            "Codex run timed out after "
+            f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"
+        )
+        log.warning("%s (chat_id=%s)", msg, chat_id)
+        session = self._sessions.get(chat_id)
+        await self._emit_lifecycle(
+            chat_id,
+            "post",
+            msg,
+            mode=session.mode if session else self._approval_mode,
+            model=session.model if session else self._initial_model,
+        )
+        await self._cancel_turn(turn)
+        raise AgentEventStreamTimeout(msg) from None
+
+    async def _cancel_turn(self, turn: Any) -> None:
+        for method_name in ("interrupt", "cancel", "close"):
+            method = getattr(turn, method_name, None)
+            if method is None:
+                continue
+            result = method()
+            if hasattr(result, "__await__"):
+                await result
+            return
+
+    async def _emit_lifecycle(
+        self,
+        chat_id: int,
+        phase: str,
+        status: str,
+        *,
+        mode: str,
+        model: str | None,
+    ) -> None:
+        if self._on_tool_event is None:
+            return
+        payload: dict[str, Any] = {
+            "tool_input": {
+                "status": status,
+                "mode": mode,
+                "model": model or "default",
+            }
+        }
+        if phase == "post":
+            payload["tool_response"] = status
+        await self._on_tool_event(chat_id, phase, "Codex", payload)
+
+    async def _handle_sdk_notification(self, chat_id: int, event: Any) -> None:
+        method = str(getattr(event, "method", ""))
+        payload = self._to_plain(getattr(event, "payload", None))
+        if isinstance(payload, dict):
+            await self.handle_app_server_event(
+                chat_id,
+                {"method": method, "params": payload},
+            )
+
+    def _to_plain(self, value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        if isinstance(value, dict) and set(value) == {"root"}:
+            return self._to_plain(value["root"])
+        if isinstance(value, dict):
+            return {key: self._to_plain(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._to_plain(item) for item in value]
+        return value
 
     def _prepare_prompt(self, prompt: str, mode: str) -> str:
         if mode != "plan":
@@ -256,6 +439,20 @@ class CodexAgentBackend:
                 if isinstance(value, str):
                     return value
         return str(result) if result is not None else ""
+
+    def _final_assistant_response_from_items(self, items: list[dict[str, Any]]) -> str:
+        fallback: str | None = None
+        for item in reversed(items):
+            if item.get("type") != "agentMessage":
+                continue
+            text = item.get("text")
+            if not isinstance(text, str):
+                continue
+            if item.get("phase") == "final_answer":
+                return text
+            if fallback is None:
+                fallback = text
+        return fallback or ""
 
     async def _emit_result_tool_events(self, chat_id: int, result: Any) -> None:
         if self._on_tool_event is None:
@@ -445,6 +642,10 @@ class CodexAgentBackend:
         return chat_id in self._sessions
 
     async def reset(self, chat_id: int) -> None:
+        lock = self._locks.get(chat_id)
+        if chat_id in self._active_turns or (lock is not None and lock.locked()):
+            await self._force_close_session(chat_id, reason="/new during active turn")
+            return
         async with self._lock(chat_id):
             session = self._sessions.pop(chat_id, None)
             if session is not None:
@@ -454,6 +655,23 @@ class CodexAgentBackend:
                     if hasattr(result, "__await__"):
                         await result
         self._locks.pop(chat_id, None)
+
+    async def _force_close_session(self, chat_id: int, *, reason: str) -> None:
+        turn = self._active_turns.pop(chat_id, None)
+        if turn is not None:
+            with contextlib.suppress(Exception):
+                await self._cancel_turn(turn)
+        session = self._sessions.pop(chat_id, None)
+        self._locks.pop(chat_id, None)
+        if session is None:
+            return
+        log.warning("force closing Codex session for chat_id=%s: %s", chat_id, reason)
+        closer = getattr(session.thread, "close", None)
+        if closer is not None:
+            with contextlib.suppress(Exception):
+                result = closer()
+                if hasattr(result, "__await__"):
+                    await result
 
     async def close_all(self) -> None:
         if self._gc_task is not None and not self._gc_task.done():

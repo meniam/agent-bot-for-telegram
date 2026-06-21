@@ -43,6 +43,8 @@ from .ui.plan_router import PlanRouter
 from .ui.reactions import ReactionPicker
 from .ui.tool_status import ToolStatusMirror
 
+BUILTIN_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "system_prompt.md"
+
 
 def _build_bot_command_list(
     tr: Translator, commands: list[CommandDef]
@@ -158,6 +160,18 @@ def _load_custom_commands(
     return commands
 
 
+def _load_builtin_system_prompt() -> str:
+    return BUILTIN_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
+
+
+def _compose_system_prompt(cfg: BotConfig, tr: Translator) -> str:
+    bot_prompt = (cfg.system_prompt or tr.t("default_system_prompt")).strip()
+    builtin_prompt = _load_builtin_system_prompt()
+    if not bot_prompt:
+        return builtin_prompt
+    return f"{builtin_prompt}\n\nBot-specific instructions:\n\n{bot_prompt}"
+
+
 async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     bot = _make_bot(cfg)
     me = await bot.get_me()
@@ -173,7 +187,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         glog.info("[%s] logs: %s", cfg.name, bot_log_dir)
 
     tr = Translator(cfg.lang)
-    system_prompt = cfg.system_prompt or tr.t("default_system_prompt")
+    system_prompt = _compose_system_prompt(cfg, tr)
     reaction_picker = ReactionPicker.from_translator(tr)
     is_allowed = _make_acl(cfg, glog)
 

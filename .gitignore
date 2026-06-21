@@ -13,6 +13,8 @@ commands/
 AUDIT.md
 promo.txt
 /bot.log
+restart.dev.sh
+.bot.dev.pid
 __pycache__/
 .cursor/
 *.pyc

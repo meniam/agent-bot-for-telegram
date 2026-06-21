@@ -7,12 +7,16 @@
 
 import asyncio
 import logging
+from pathlib import Path
 
 from aiogram.types import Message, ReactionTypeEmoji
 
 from ..handlers.context import BotContext
+from ..infra.agent_types import AgentEventStreamTimeout, AgentTurnReset
 from ..services.upload_store import format_attachment_prompt
+from .file_delivery import parse_file_delivery, send_file_delivery
 from .markdown import send_md
+from .questionnaire import parse_questionnaire, render_questionnaire
 
 
 async def react_to(ctx: BotContext, message: Message, text: str) -> None:
@@ -57,6 +61,14 @@ async def reply_with_agent(
             ctx.tr.t("agent_timeout", seconds=ctx.cfg.agent_timeout_sec),
         )
         return
+    except AgentTurnReset as e:
+        cl.info("agent turn reset: %s", e)
+        return
+    except AgentEventStreamTimeout as e:
+        ctx.glog.warning("[%s] agent event stream timeout: %s", ctx.cfg.name, e)
+        cl.warning("agent event stream timeout: %s", e)
+        await send_md(message, ctx.tr.t("agent_stalled"))
+        return
     except Exception as e:
         ctx.glog.exception("[%s] agent error", ctx.cfg.name)
         cl.exception("agent error: %s", e)
@@ -65,5 +77,26 @@ async def reply_with_agent(
         )
         return
     final = answer.strip() or ctx.tr.t("empty_answer")
+    delivery = parse_file_delivery(final)
+    if delivery is not None:
+        roots = [
+            path
+            for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir)
+            if path is not None
+        ]
+        cl.info("bot file delivery: %d file(s)", len(delivery.files))
+        await send_file_delivery(
+            message,
+            delivery,
+            roots=[Path(path) for path in roots],
+            t=ctx.tr,
+            cl=cl,
+        )
+        return
+    questionnaire = parse_questionnaire(final)
+    if questionnaire is not None:
+        cl.info("bot questionnaire: %d question(s)", len(questionnaire.questions))
+        await render_questionnaire(message, questionnaire, ctx.tr)
+        return
     cl.info("bot: %s", final)
     await send_md(message, final)

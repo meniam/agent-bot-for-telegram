@@ -19,13 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .agent_types import ToolEventCallback
+from .agent_types import AgentEventStreamTimeout, AgentTurnReset, ToolEventCallback
 
 log = logging.getLogger(__name__)
 
 PI_MODES: tuple[str, ...] = ("default", "read_only", "no_tools", "plan")
 PI_MODELS: tuple[tuple[str, str], ...] = (("", ""),)
 _READ_ONLY_TOOLS = ("read", "grep", "find", "ls")
+PI_EVENT_TIMEOUT_SEC = 120.0
 
 
 class PiRpcTransport(Protocol):
@@ -56,8 +57,10 @@ class PiRpcProcess:
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._reader_task: asyncio.Task[None] | None = None
         self._write_lock = asyncio.Lock()
+        self._closed = False
 
     async def start(self) -> None:
+        self._closed = False
         args = [self._cli_bin, "--mode", "rpc"]
         if not self._persist_session:
             args.append("--no-session")
@@ -91,6 +94,7 @@ class PiRpcProcess:
         return await self._events.get()
 
     async def close(self) -> None:
+        self._closed = True
         if self._reader_task is not None and not self._reader_task.done():
             self._reader_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -109,8 +113,11 @@ class PiRpcProcess:
             if not fut.done():
                 fut.set_exception(RuntimeError("PI RPC process closed"))
         self._pending.clear()
+        self._events.put_nowait({"type": "rpc_closed"})
 
     async def _ensure_started(self) -> None:
+        if self._closed:
+            raise RuntimeError("PI RPC process closed")
         if self._proc is None:
             await self.start()
         if self._proc is None or self._proc.stdin is None:
@@ -263,16 +270,41 @@ class PiAgentBackend:
             self._active.add(chat_id)
             saw_delta = False
             try:
+                await self._emit_lifecycle(
+                    chat_id,
+                    "pre",
+                    "prompt sent",
+                    mode=session.mode,
+                    model=session.model,
+                )
+                log.info(
+                    "PI prompt sent chat_id=%s mode=%s model=%s images=%d",
+                    chat_id,
+                    session.mode,
+                    session.model or "default",
+                    len(images),
+                )
                 response = await session.transport.request(command)
                 if not bool(response.get("success")):
                     raise RuntimeError(str(response.get("error") or response))
                 while True:
-                    event = await session.transport.next_event()
+                    event = await self._next_event_with_watchdog(chat_id, session)
+                    event_type = str(event.get("type") or "")
+                    log.info("PI event chat_id=%s type=%s", chat_id, event_type)
+                    if event_type == "rpc_closed":
+                        raise AgentTurnReset("PI RPC session reset")
                     delta = await self._handle_event(chat_id, event)
                     if delta:
                         saw_delta = True
                         yield delta
-                    if event.get("type") == "agent_end":
+                    if event_type == "agent_end":
+                        await self._emit_lifecycle(
+                            chat_id,
+                            "post",
+                            "agent_end",
+                            mode=session.mode,
+                            model=session.model,
+                        )
                         break
                 if not saw_delta:
                     text = await self._last_assistant_text(session)
@@ -281,6 +313,55 @@ class PiAgentBackend:
             finally:
                 self._active.discard(chat_id)
                 session.last_used = time.monotonic()
+
+    async def _next_event_with_watchdog(
+        self, chat_id: int, session: _PiSession
+    ) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(
+                session.transport.next_event(),
+                timeout=PI_EVENT_TIMEOUT_SEC,
+            )
+        except TimeoutError:
+            msg = (
+                "PI RPC event stream timed out after "
+                f"{PI_EVENT_TIMEOUT_SEC:.0f}s waiting for the next event"
+            )
+            log.warning("%s (chat_id=%s)", msg, chat_id)
+            await self._emit_lifecycle(
+                chat_id,
+                "post",
+                msg,
+                mode=session.mode,
+                model=session.model,
+            )
+            with contextlib.suppress(Exception):
+                await session.transport.request({"type": "abort_bash"})
+            with contextlib.suppress(Exception):
+                await session.transport.request({"type": "abort"})
+            raise AgentEventStreamTimeout(msg) from None
+
+    async def _emit_lifecycle(
+        self,
+        chat_id: int,
+        phase: str,
+        status: str,
+        *,
+        mode: str,
+        model: str | None,
+    ) -> None:
+        if self._on_tool_event is None:
+            return
+        payload: dict[str, Any] = {
+            "tool_input": {
+                "status": status,
+                "mode": mode,
+                "model": model or "default",
+            }
+        }
+        if phase == "post":
+            payload["tool_response"] = status
+        await self._on_tool_event(chat_id, phase, "PI", payload)
 
     def _prepare_prompt(self, prompt: str, mode: str) -> str:
         parts: list[str] = []
@@ -520,6 +601,10 @@ class PiAgentBackend:
         return chat_id in self._sessions
 
     async def reset(self, chat_id: int) -> None:
+        lock = self._locks.get(chat_id)
+        if chat_id in self._active or (lock is not None and lock.locked()):
+            await self._force_close_session(chat_id, reason="/new during active turn")
+            return
         async with self._lock(chat_id):
             session = self._sessions.get(chat_id)
             if session is None:
@@ -535,6 +620,16 @@ class PiAgentBackend:
             self._sessions.pop(chat_id, None)
             await session.transport.close()
         self._locks.pop(chat_id, None)
+
+    async def _force_close_session(self, chat_id: int, *, reason: str) -> None:
+        session = self._sessions.pop(chat_id, None)
+        self._active.discard(chat_id)
+        self._locks.pop(chat_id, None)
+        if session is None:
+            return
+        log.warning("force closing PI RPC session for chat_id=%s: %s", chat_id, reason)
+        with contextlib.suppress(Exception):
+            await session.transport.close()
 
     async def close_all(self) -> None:
         if self._gc_task is not None and not self._gc_task.done():

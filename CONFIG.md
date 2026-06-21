@@ -108,10 +108,12 @@ Each section: type, default, semantics, valid values, related fields.
 - **Type:** `str | null`.
 - **Default:** `null` → falls back to translation key
   `default_system_prompt` for the chosen `lang`.
-- **Semantics:** selected agent's system prompt. Controls reply language and
-  personality. Overrides the i18n default when set.
-- **Tip:** Use this to set a per-bot personality / role. UI strings are
-  controlled separately by `lang`.
+- **Semantics:** per-bot personality / role instructions. These instructions
+  are appended to the built-in bridge contract from
+  `src/config/system_prompt.md` at bot startup.
+- **Tip:** Keep Telegram UI / structured-output protocol rules in
+  `src/config/system_prompt.md`; keep only bot-specific personality and user
+  preferences here. UI strings are controlled separately by `lang`.
 
 ### `agent_provider`
 

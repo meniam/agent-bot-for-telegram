@@ -2,7 +2,7 @@
 
 import logging
 
-from src.bot import _build_bot_command_list, _make_acl
+from src.bot import _build_bot_command_list, _compose_system_prompt, _make_acl
 from src.config import BotConfig
 from src.i18n import Translator
 from src.infra.commands import CommandDef
@@ -76,3 +76,12 @@ def test_command_list_builtin_descriptions_translated() -> None:
         # Translation keys would surface as `bot_command_<x>`; that means the
         # i18n file is missing the entry.
         assert not bc.description.startswith("bot_command_")
+
+
+def test_system_prompt_combines_builtin_contract_and_bot_prompt() -> None:
+    cfg = _cfg(system_prompt="Speak like Brain.")
+    prompt = _compose_system_prompt(cfg, Translator("en"))
+
+    assert "Structured questionnaire format" in prompt
+    assert "Bot-specific instructions:" in prompt
+    assert prompt.endswith("Speak like Brain.")

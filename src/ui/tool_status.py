@@ -46,6 +46,8 @@ _TOOL_PRIMARY_FIELD: dict[str, str] = {
     "Monitor": "description",
     "TaskOutput": "task_id",
     "ToolSearch": "query",
+    "PI": "status",
+    "Codex": "status",
 }
 
 _TOOL_PATH_FIELDS = frozenset({
@@ -73,6 +75,8 @@ _TOOL_EMOJI: dict[str, str] = {
     "monitor": "📡",
     "taskoutput": "📋",
     "toolsearch": "🧰",
+    "pi": "🧠",
+    "codex": "🧠",
 }
 
 
@@ -237,10 +241,11 @@ class ToolStatusMirror:
                         tool=tool_display,
                         preview=preview,
                     )
+                    cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
+                    await self._upsert_status(chat_id, body)
                 else:
+                    cl.info("hook %s: %s: готово", phase, tool_display)
                     return
-                cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
-                await self._upsert_status(chat_id, body)
         except Exception:
             self._glog.exception(
                 "[%s] tool-event delivery failed", self._bot_name

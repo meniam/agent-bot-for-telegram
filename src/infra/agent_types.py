@@ -13,6 +13,14 @@ ToolEventCallback = Callable[
 ]
 
 
+class AgentTurnReset(RuntimeError):
+    """Raised when an in-flight agent turn is intentionally reset."""
+
+
+class AgentEventStreamTimeout(RuntimeError):
+    """Raised when an agent backend stops emitting progress events."""
+
+
 class AgentBackend(Protocol):
     @property
     def provider(self) -> str: ...

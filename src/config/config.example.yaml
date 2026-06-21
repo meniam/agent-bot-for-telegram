@@ -1,46 +1,83 @@
+# Internal bot name used for logs and env overrides, not Telegram @username.
 brain:
+  # Telegram gateway settings: token, UI, logs, access, voice, and uploads.
   gateway:
+    # Token from @BotFather; can be overridden by TELEGRAM_BOT_TOKEN_BRAIN.
     telegram_bot_token: put-bot-token-from-BotFather-here
+    # Bot UI language from src/i18n, for example ru or en.
     lang: ru
+    # Directory for bot.log and per-chat log files.
     logs_dir: /var/log/telegram-agent-bot
+    # Directory with custom slash-command .md files.
     commands_dir: /etc/telegram-agent-bot/commands
+    # Minimum delay between Telegram draft updates while the agent streams.
     draft_interval_sec: 0.2
+    # Seconds to wait for permission, plan, and question button clicks.
     approval_timeout_sec: 300
+    # Maximum number of per-chat file loggers kept open.
     chat_logger_capacity: 256
 
+    # Access is fail-closed: empty allow list means nobody can use the bot.
     access:
+      # true opens the bot to everyone except blacklisted chats.
       allowed_for_all: false
+      # Telegram chat IDs allowed when allowed_for_all is false.
       allowed_chat_ids: []
+      # Telegram chat IDs always denied, even when otherwise allowed.
       blacklist_chat_ids: []
 
+    # Voice/audio transcription via Groq; null or placeholder disables it.
     voice:
+      # Groq API key; can also come from GROQ_API_KEY_BRAIN or GROQ_API_KEY.
       api_key: put-groq-api-key-here-or-set-GROQ_API_KEY_env
+      # Groq transcription model used for Telegram voice/audio.
       model: whisper-large-v3-turbo
+      # Reject voice/audio longer than this many seconds; 0 disables the check.
       max_duration_sec: 600
+      # HTTP timeout for the transcription request.
       timeout_sec: 60.0
 
+    # Upload handling for photos, documents, and stickers.
     uploads:
+      # Directory where incoming files are saved; null disables uploads.
       dir: /var/lib/telegram-agent-bot/uploads
+      # Reject files larger than this many bytes; 0 disables the local check.
       max_bytes: 20971520
 
+  # Agent backend settings shared by Claude, Codex, and PI.
   agent:
+    # Backend to use for this bot: claude, codex, or pi.
     provider: claude
+    # Initial model id; null uses the selected backend default.
     model: null
+    # Working directory for the agent's file access and project settings.
     working_path: /home/brain/workdir
+    # Agent instructions; null would use the default i18n system prompt.
     system_prompt: |
       You are a friendly assistant.
       Be concise.
+    # Hard timeout for one agent turn, including tool calls and approvals.
     agent_timeout_sec: 600
+    # Close idle per-chat sessions after this many seconds; 0 disables GC.
     session_idle_ttl_sec: 86400
 
+  # Backend-specific options; ignored unless that provider is selected.
   providers:
+    # Claude currently uses defaults from the SDK and project settings.
     claude: {}
 
+    # Codex-specific sandbox and approval defaults.
     codex:
+      # File access preset: read_only, workspace_write, or danger_full_access.
       sandbox: workspace_write
+      # Approval preset mirrored by /mode: default, on_request, never, full_auto.
       approval_mode: default
 
+    # PI.dev CLI backend settings.
     pi:
+      # Path to pi executable; null means find it in PATH.
       cli_bin: null
+      # PI tool policy: default, read_only, or no_tools.
       tools_mode: default
+      # true lets PI persist sessions; false starts with --no-session.
       session_persistence: false
