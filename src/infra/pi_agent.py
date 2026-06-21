@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .agent_types import AgentEventStreamTimeout, AgentTurnReset, ToolEventCallback
+from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
 
 log = logging.getLogger(__name__)
 
@@ -256,10 +256,11 @@ class PiAgentBackend:
     async def ask(self, chat_id: int, prompt: str) -> str:
         chunks: list[str] = []
         async for chunk in self.ask_stream(chat_id, prompt):
-            chunks.append(chunk)
+            if chunk.kind == "text":
+                chunks.append(chunk.text)
         return "".join(chunks).strip() or "(empty response)"
 
-    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[str]:
+    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
         async with self._lock(chat_id):
             session = await self._get_session(chat_id)
             run_prompt = self._prepare_prompt(prompt, session.mode)
@@ -296,7 +297,7 @@ class PiAgentBackend:
                     delta = await self._handle_event(chat_id, event)
                     if delta:
                         saw_delta = True
-                        yield delta
+                        yield StreamChunk(kind="text", text=delta)
                     if event_type == "agent_end":
                         await self._emit_lifecycle(
                             chat_id,
@@ -309,7 +310,7 @@ class PiAgentBackend:
                 if not saw_delta:
                     text = await self._last_assistant_text(session)
                     if text:
-                        yield text
+                        yield StreamChunk(kind="text", text=text)
             finally:
                 self._active.discard(chat_id)
                 session.last_used = time.monotonic()

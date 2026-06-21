@@ -405,7 +405,9 @@ async def test_codex_backend_thread_lifecycle_and_stream() -> None:
 
     chunks = [chunk async for chunk in backend.ask_stream(10, "hello")]
 
-    assert chunks == ["done"]
+    assert len(chunks) == 1
+    assert chunks[0].kind == "text"
+    assert chunks[0].text == "done"
     assert backend.has_session(10) is True
     assert fake.thread.prompts == ["hello"]
     assert [(phase, tool) for _, phase, tool, _ in events] == [
@@ -508,7 +510,7 @@ async def test_pi_backend_streams_events_and_tool_status() -> None:
 
     chunks = [chunk async for chunk in backend.ask_stream(10, "hello")]
 
-    assert chunks == ["hel", "lo"]
+    assert [c.text for c in chunks] == ["hel", "lo"]
     assert backend.has_session(10) is True
     prompt_request = fake.requests[0]
     assert prompt_request["type"] == "prompt"

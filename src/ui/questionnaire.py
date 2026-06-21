@@ -99,7 +99,7 @@ def parse_questionnaire(text: str) -> Questionnaire | None:
 
 def _extract_payload(text: str) -> str | None:
     stripped = text.strip()
-    match = _FENCE_RE.fullmatch(stripped)
+    match = _FENCE_RE.search(stripped)
     if match is not None:
         return match.group("body")
     if stripped.startswith("{") and stripped.endswith("}"):

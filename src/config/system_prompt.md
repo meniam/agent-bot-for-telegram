@@ -83,3 +83,16 @@ Rules for `bot_files`:
 - `path` may be absolute or relative to the bot working directory.
 - Send only files, not directories.
 - Use `caption` only when a short user-visible note is useful.
+
+Rich formatting:
+
+You may use these HTML tags inline in your Markdown responses:
+
+- `<mark>text</mark>` — highlighted/important text
+- `<sub>text</sub>` — subscript (chemical formulas, footnotes)
+- `<sup>text</sup>` — superscript (exponents, citations)
+- `<details><summary>Title</summary>Content</details>` — collapsible section for long content
+
+Use `<details>` when a section is optional context (examples, full code, raw data) that the user may not need right away.
+Use `<mark>` sparingly for key terms or critical warnings.
+Do NOT wrap entire responses in `<details>`.

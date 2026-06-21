@@ -19,7 +19,7 @@ from claude_agent_sdk import (
     ToolPermissionContext,
 )
 
-from .agent_types import ToolEventCallback
+from .agent_types import StreamChunk, ToolEventCallback
 
 log = logging.getLogger(__name__)
 
@@ -212,19 +212,13 @@ class ClaudeAgentBackend:
         return client
 
     async def ask(self, chat_id: int, prompt: str) -> str:
-        async with self._lock(chat_id):
-            client = await self._get_client(chat_id)
-            await client.query(prompt)
-            chunks: list[str] = []
-            async for msg in client.receive_response():
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            chunks.append(block.text)
-            self._clients[chat_id] = (client, time.monotonic())
-            return "".join(chunks).strip() or "(empty response)"
+        chunks: list[str] = []
+        async for chunk in self.ask_stream(chat_id, prompt):
+            if chunk.kind == "text":
+                chunks.append(chunk.text)
+        return "".join(chunks).strip() or "(empty response)"
 
-    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[str]:
+    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             await client.query(prompt)
@@ -232,16 +226,19 @@ class ClaudeAgentBackend:
             async for msg in client.receive_response():
                 if isinstance(msg, StreamEvent):
                     event = msg.event
-                    if (
-                        event.get("type") == "content_block_delta"
-                        and event.get("delta", {}).get("type") == "text_delta"
-                    ):
-                        saw_delta = True
-                        yield event["delta"]["text"]
+                    delta = event.get("delta", {})
+                    delta_type = delta.get("type") if isinstance(delta, dict) else None
+                    if event.get("type") == "content_block_delta":
+                        if delta_type == "text_delta":
+                            saw_delta = True
+                            yield StreamChunk(kind="text", text=delta["text"])
+                        elif delta_type == "thinking_delta":
+                            saw_delta = True
+                            yield StreamChunk(kind="thinking", text=delta.get("thinking", ""))
                 elif isinstance(msg, AssistantMessage) and not saw_delta:
                     for block in msg.content:
                         if isinstance(block, TextBlock):
-                            yield block.text
+                            yield StreamChunk(kind="text", text=block.text)
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]:
         async with self._lock(chat_id):

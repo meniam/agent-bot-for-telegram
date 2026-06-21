@@ -9,9 +9,8 @@ import logging
 import re
 
 from aiogram import Bot
-from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message
+from aiogram.types import InputRichMessage, Message
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 
@@ -21,6 +20,26 @@ TG_LIMIT = 4000
 
 _md = MarkdownIt()
 _md.enable("strikethrough")
+_md.enable("table")
+
+_SAFE_TAG_RE = re.compile(
+    r"</?(?:mark|sub|sup|details|summary|tg-spoiler)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+
+
+def _passthrough_safe_tags(raw: str) -> str:
+    """Escape plain text, keep whitelisted HTML tags, strip everything else."""
+    parts: list[str] = []
+    pos = 0
+    for m in re.finditer(r"<[^>]+>", raw):
+        parts.append(html.escape(raw[pos : m.start()]))
+        tag = m.group(0)
+        if _SAFE_TAG_RE.fullmatch(tag):
+            parts.append(tag)
+        pos = m.end()
+    parts.append(html.escape(raw[pos:]))
+    return "".join(parts)
 
 
 def _render(node: SyntaxTreeNode) -> str:
@@ -66,7 +85,9 @@ def _render(node: SyntaxTreeNode) -> str:
         return f"<pre>{html.escape(node.content.rstrip())}</pre>\n\n"
 
     if t == "heading":
-        return f'<b>{"".join(_render(c) for c in ch)}</b>\n\n'
+        level = max(1, min(6, len(node.markup))) if node.markup else 1
+        inner = "".join(_render(c) for c in ch)
+        return f"<h{level}>{inner}</h{level}>\n\n"
 
     if t == "paragraph":
         return f'{"".join(_render(c) for c in ch)}\n\n'
@@ -97,10 +118,25 @@ def _render(node: SyntaxTreeNode) -> str:
         return html.escape(str(node.attrGet("alt") or ""))
 
     if t == "hr":
-        return "\n"
+        return "<hr>\n"
+
+    if t == "table":
+        return f"<table>{''.join(_render(c) for c in ch)}</table>\n"
+
+    if t in ("thead", "tbody"):
+        return "".join(_render(c) for c in ch)
+
+    if t == "tr":
+        return f"<tr>{''.join(_render(c) for c in ch)}</tr>\n"
+
+    if t == "th":
+        return f"<th>{''.join(_render(c) for c in ch).strip()}</th>"
+
+    if t == "td":
+        return f"<td>{''.join(_render(c) for c in ch).strip()}</td>"
 
     if t in ("html_block", "html_inline"):
-        return html.escape(re.sub(r"<[^>]+>", "", node.content))
+        return _passthrough_safe_tags(node.content)
 
     if ch:
         return "".join(_render(c) for c in ch)
@@ -131,7 +167,7 @@ def to_html(text: str) -> str:
 
 
 async def send_md(message: Message, text: str) -> None:
-    """Sends Markdown as Telegram HTML in chunks of ≤ TG_LIMIT.
+    """Sends Markdown as Telegram Rich Message HTML in chunks of ≤ TG_LIMIT.
 
     Falls back to plain text for any chunk that the parser rejects.
     """
@@ -145,27 +181,28 @@ async def send_md_to_chat(bot: Bot, chat_id: int, text: str) -> None:
     """Chat-id-bound twin of `send_md` — used for bot-initiated messages
     (hooks, notifications) that have no inbound `Message` to reply to.
 
-    Tries HTML first; on parse failure falls back to plain text so the
-    user never sees raw escape artifacts.
+    Tries sendRichMessage with HTML first; on parse failure falls back to
+    plain text so the user never sees raw escape artifacts.
     """
     converted = to_html(text)
     sent_any = False
     for i in range(0, len(converted), TG_LIMIT):
         chunk = converted[i : i + TG_LIMIT]
         try:
-            await bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+            await bot.send_rich_message(
+                chat_id=chat_id,
+                rich_message=InputRichMessage(html=chunk),
+            )
             sent_any = True
         except TelegramBadRequest:
             log.warning(
-                "send_md_to_chat: HTML rejected for chat_id=%s — "
+                "send_md_to_chat: Rich Message rejected for chat_id=%s — "
                 "falling back to plain text (sent_any=%s)",
                 chat_id,
                 sent_any,
             )
             for j in range(0, len(text), TG_LIMIT):
-                await bot.send_message(
-                    chat_id, text[j : j + TG_LIMIT], parse_mode=None
-                )
+                await bot.send_message(chat_id, text[j : j + TG_LIMIT], parse_mode=None)
             return
 
 

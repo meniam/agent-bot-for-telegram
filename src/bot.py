@@ -37,7 +37,7 @@ from .infra.streaming import DraftStreamer
 from .services.transcribe import GroqTranscriber
 from .services.upload_store import UploadStore
 from .ui.album import AlbumDebouncer
-from .ui.markdown import send_md_to_chat
+from .ui.markdown import send_md_to_chat, to_html
 from .ui.middleware import AclMiddleware
 from .ui.plan_router import PlanRouter
 from .ui.reactions import ReactionPicker
@@ -192,9 +192,9 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     is_allowed = _make_acl(cfg, glog)
 
     streamer = DraftStreamer(
-        cfg.telegram_bot_token.get_secret_value(),
-        http,
+        bot,
         interval_sec=cfg.draft_interval_sec,
+        convert=to_html,
     )
     gate = TelegramInteractionGate(
         bot,

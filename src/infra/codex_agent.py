@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .agent_types import AgentEventStreamTimeout, AgentTurnReset, ToolEventCallback
+from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
 
 log = logging.getLogger(__name__)
 
@@ -216,10 +216,11 @@ class CodexAgentBackend:
     async def ask(self, chat_id: int, prompt: str) -> str:
         chunks: list[str] = []
         async for chunk in self.ask_stream(chat_id, prompt):
-            chunks.append(chunk)
+            if chunk.kind == "text":
+                chunks.append(chunk.text)
         return "".join(chunks).strip() or "(empty response)"
 
-    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[str]:
+    async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
         async with self._lock(chat_id):
             thread = await self._get_thread(chat_id)
             session = self._sessions[chat_id]
@@ -253,7 +254,7 @@ class CodexAgentBackend:
                     model=session.model,
                 )
                 if text:
-                    yield text
+                    yield StreamChunk(kind="text", text=text)
             finally:
                 self._active_turns.pop(chat_id, None)
                 session.last_used = time.monotonic()

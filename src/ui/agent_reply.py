@@ -9,7 +9,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from aiogram.types import Message, ReactionTypeEmoji
+from aiogram.types import Message, ReactionTypeEmoji, User
 
 from ..handlers.context import BotContext
 from ..infra.agent_types import AgentEventStreamTimeout, AgentTurnReset
@@ -17,6 +17,20 @@ from ..services.upload_store import format_attachment_prompt
 from .file_delivery import parse_file_delivery, send_file_delivery
 from .markdown import send_md
 from .questionnaire import parse_questionnaire, render_questionnaire
+
+
+def _user_context_prefix(user: User | None, chat_id: int) -> str:
+    if user is None:
+        return f"[Telegram user: chat_id={chat_id}]\n\n"
+    parts = [f"chat_id={chat_id}"]
+    if user.username:
+        parts.append(f"username=@{user.username}")
+    name = " ".join(filter(None, [user.first_name, user.last_name]))
+    if name:
+        parts.append(f"name={name}")
+    if user.language_code:
+        parts.append(f"lang={user.language_code}")
+    return f"[Telegram user: {', '.join(parts)}]\n\n"
 
 
 async def react_to(ctx: BotContext, message: Message, text: str) -> None:
@@ -34,6 +48,10 @@ async def react_to(ctx: BotContext, message: Message, text: str) -> None:
 async def reply_with_agent(
     ctx: BotContext, message: Message, prompt: str, cl: logging.Logger
 ) -> None:
+    if not ctx.agent.has_session(message.chat.id):
+        prefix = _user_context_prefix(message.from_user, message.chat.id)
+        prompt = prefix + prompt
+        cl.info("injected user context for new session")
     if ctx.uploads is not None:
         pending = ctx.uploads.pop_pending(message.chat.id)
         if pending:

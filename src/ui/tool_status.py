@@ -5,12 +5,14 @@ the interaction gate. `post` fires only for the small set of tools whose tail
 output is actually useful (Monitor, TaskOutput).
 """
 
+import html as _html
 import logging
 from pathlib import Path
 from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InputRichMessage
 
 from ..i18n import Translator
 from ..infra.logs import BotLogs
@@ -168,14 +170,15 @@ class ToolStatusMirror:
 
     async def _upsert_status(self, chat_id: int, body: str) -> None:
         body = _one_line(body)
+        html_body = f"<code>{_html.escape(body[:TG_LIMIT])}</code>"
+        rich = InputRichMessage(html=html_body)
         message_id = self._last_status_message.get(chat_id)
         if message_id is not None:
             try:
                 await self._bot.edit_message_text(
-                    body[:TG_LIMIT],
                     chat_id=chat_id,
                     message_id=message_id,
-                    parse_mode=None,
+                    rich_message=rich,
                 )
                 return
             except TelegramBadRequest as e:
@@ -183,10 +186,9 @@ class ToolStatusMirror:
                     return
                 log.debug("tool status edit failed; sending new status", exc_info=True)
         try:
-            sent = await self._bot.send_message(
-                chat_id,
-                body[:TG_LIMIT],
-                parse_mode=None,
+            sent = await self._bot.send_rich_message(
+                chat_id=chat_id,
+                rich_message=rich,
                 disable_notification=True,
             )
         except TelegramBadRequest:

@@ -68,9 +68,35 @@ def test_list_with_bold_item() -> None:
 
 # --- to_html: headings ---
 
-def test_heading_becomes_bold() -> None:
+def test_heading_h1() -> None:
     out = to_html("# Hello")
-    assert "<b>Hello</b>" in out
+    assert "<h1>Hello</h1>" in out
+
+
+def test_heading_h2() -> None:
+    out = to_html("## Second")
+    assert "<h2>Second</h2>" in out
+
+
+def test_hr() -> None:
+    assert "<hr>" in to_html("---")
+
+
+def test_table() -> None:
+    md = "| A | B |\n|---|---|\n| 1 | 2 |"
+    result = to_html(md)
+    assert "<table>" in result
+    assert "<th>" in result
+    assert "<td>1</td>" in result
+
+
+def test_safe_html_mark() -> None:
+    out = to_html("<mark>important</mark>")
+    assert "<mark>important</mark>" in out
+
+
+def test_unsafe_html_stripped() -> None:
+    assert "<script>" not in to_html("<script>alert(1)</script>")
 
 
 # --- to_html: blockquote ---

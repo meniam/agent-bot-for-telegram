@@ -5,12 +5,21 @@ classes. Provider adapters keep Claude / Codex wire details inside infra.
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 ToolEventCallback = Callable[
     [int, str, str, dict[str, Any]],
     Awaitable[None],
 ]
+
+
+@dataclass(slots=True)
+class StreamChunk:
+    """One chunk emitted by ask_stream(). kind='thinking' for extended-thinking tokens."""
+
+    kind: Literal["text", "thinking"]
+    text: str
 
 
 class AgentTurnReset(RuntimeError):
@@ -31,7 +40,7 @@ class AgentBackend(Protocol):
 
     async def ask(self, chat_id: int, prompt: str) -> str: ...
 
-    def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[str]: ...
+    def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]: ...
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]: ...
 
