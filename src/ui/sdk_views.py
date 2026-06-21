@@ -8,25 +8,52 @@ from typing import Any
 from ..i18n import Translator
 
 
-def format_context_usage(usage: dict[str, Any], tr: Translator) -> str:
-    """Render the response of ClaudeSDKClient.get_context_usage() as Markdown."""
+def _mono_table(rows: list[tuple[str, ...]], aligns: str) -> str:
+    """Render rows as a fixed-width monospace block, wrapped in a fence.
+
+    Telegram ignores the HTML `align` attribute on table cells, so a `<pre>`
+    block with manual padding is the only reliable way to right-align columns.
+    `aligns` is one char per column: 'r' right-justified, anything else left.
+    """
+    cols = len(aligns)
+    widths = [max(len(r[i]) for r in rows) for i in range(cols)]
+    out: list[str] = []
+    for r in rows:
+        cells = [
+            r[i].rjust(widths[i]) if aligns[i] == "r" else r[i].ljust(widths[i])
+            for i in range(cols)
+        ]
+        out.append("  ".join(cells).rstrip())
+    return "```\n" + "\n".join(out) + "\n```"
+
+
+def format_context_usage(
+    usage: dict[str, Any],
+    tr: Translator,
+    provider: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Render the response of ClaudeSDKClient.get_context_usage() as Markdown.
+
+    `provider`/`model` override the usage payload so the report names the
+    backend the user actually selected; falls back to the payload's model.
+    """
     total = int(usage.get("totalTokens") or 0)
     max_t = int(usage.get("maxTokens") or 0)
     pct = float(usage.get("percentage") or 0.0)
-    model = str(usage.get("model") or "?")
+    model_name = model or str(usage.get("model") or "?")
     free = max(max_t - total, 0)
-    lines = [
-        tr.t(
-            "context_header",
-            pct=f"{pct:.1f}",
-            used=f"{total:,}",
-            max=f"{max_t:,}",
-            free=f"{free:,}",
-            model=model,
-        ),
-        "",
-        tr.t("context_categories"),
-    ]
+    summary = _mono_table(
+        [
+            (tr.t("context_lbl_provider"), provider or "?"),
+            (tr.t("context_lbl_model"), model_name),
+            (tr.t("context_lbl_fill"), f"{pct:.1f}%"),
+            (tr.t("context_lbl_tokens"), f"{total:,} / {max_t:,}"),
+            (tr.t("context_lbl_free"), f"{free:,}"),
+        ],
+        aligns="rl",
+    )
+    lines = [tr.t("context_title"), "", summary, "", tr.t("context_categories")]
     cats = sorted(
         (
             c
@@ -36,8 +63,21 @@ def format_context_usage(usage: dict[str, Any], tr: Translator) -> str:
         key=lambda c: int(c["tokens"]),
         reverse=True,
     )
-    for c in cats:
-        lines.append(f"• {c['name']} — {int(c['tokens']):,}")
+    if cats:
+        cat_rows: list[tuple[str, ...]] = [
+            (
+                tr.t("context_col_category"),
+                tr.t("context_col_tokens"),
+                tr.t("context_col_pct"),
+            )
+        ]
+        for c in cats:
+            tokens = int(c["tokens"])
+            share = (tokens / total * 100) if total else 0.0
+            cat_rows.append((str(c["name"]), f"{tokens:,}", f"{share:.0f}%"))
+        lines.append(_mono_table(cat_rows, aligns="rrr"))
+    else:
+        lines.append(tr.t("context_cat_empty"))
     return "\n".join(lines)
 
 

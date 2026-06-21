@@ -17,6 +17,7 @@ from ..i18n import Translator
 from ..infra.agent import AgentBackend
 from ..infra.interactions import TelegramInteractionGate
 from ..infra.logs import BotLogs
+from ..infra.session_store import SessionStore
 from ..infra.streaming import DraftStreamer
 from ..services.transcribe import GroqTranscriber
 from ..services.upload_store import UploadStore
@@ -34,6 +35,7 @@ class BotContext:
     glog: logging.Logger
     bot_logs: BotLogs
     agent: AgentBackend
+    sessions: SessionStore
     gate: TelegramInteractionGate
     streamer: DraftStreamer
     tool_mirror: ToolStatusMirror

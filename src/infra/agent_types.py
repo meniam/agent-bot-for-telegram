@@ -6,7 +6,10 @@ classes. Provider adapters keep Claude / Codex wire details inside infra.
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+if TYPE_CHECKING:
+    from .session_store import Session
 
 ToolEventCallback = Callable[
     [int, str, str, dict[str, Any]],
@@ -59,6 +62,22 @@ class AgentBackend(Protocol):
     def current_model(self, chat_id: int) -> str | None: ...
 
     def has_session(self, chat_id: int) -> bool: ...
+
+    async def new_session(self, chat_id: int) -> "Session": ...
+
+    async def switch_session(
+        self, chat_id: int, sid: str
+    ) -> "Session | None": ...
+
+    async def delete_session(
+        self, chat_id: int, sid: str
+    ) -> "Session | None": ...
+
+    def list_sessions(self, chat_id: int) -> "list[Session]": ...
+
+    def current_session(self, chat_id: int) -> "Session | None": ...
+
+    async def generate_title(self, text: str) -> str | None: ...
 
     async def reset(self, chat_id: int) -> None: ...
 

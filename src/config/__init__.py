@@ -40,6 +40,7 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
     "paths": {
         "working_dir": "working_dir",
         "logs_dir": "logs_dir",
+        "sessions_dir": "sessions_dir",
         "commands_dir": "commands_dir",
     },
     "pi": {
@@ -79,6 +80,7 @@ GATEWAY_CONFIG_FIELDS: dict[str, str] = {
     "telegram_bot_token": "telegram_bot_token",
     "lang": "lang",
     "logs_dir": "logs_dir",
+    "sessions_dir": "sessions_dir",
     "commands_dir": "commands_dir",
     "allowed_for_all": "allowed_for_all",
     "allowed_chat_ids": "allowed_chat_ids",
@@ -139,6 +141,8 @@ class BotConfig(BaseModel):
     chat_logger_capacity: int = 256
     working_dir: str | None = None
     logs_dir: str | None = None
+    # Directory for per-chat session metadata JSON. None → var/sessions.
+    sessions_dir: str | None = None
     lang: str = "ru"
     # Voice/audio transcription via Groq. None disables the feature; the
     # voice handler then replies with `voice_disabled`.
@@ -256,7 +260,16 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
-def _build(name: str, data: dict[str, Any]) -> BotConfig:
+def _resolve_path(raw: str, base_dir: Path) -> Path:
+    """Expand ``~`` and anchor relative paths to the config file's directory
+    (not the process CWD), then resolve to an absolute path."""
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = base_dir / p
+    return p.resolve()
+
+
+def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
     data = _flatten_nested_sections(name, data)
 
     raw_token = data.get("telegram_bot_token") or os.environ.get(
@@ -277,33 +290,39 @@ def _build(name: str, data: dict[str, Any]) -> BotConfig:
 
     working_dir = data.get("working_dir")
     if working_dir:
-        wd = Path(working_dir).expanduser()
+        wd = _resolve_path(working_dir, base_dir)
         if not wd.is_dir():
             raise ValueError(
                 f"[{name}] working_dir does not exist or is not a directory: {wd}"
             )
-        working_dir = str(wd.resolve())
+        working_dir = str(wd)
 
     logs_dir = data.get("logs_dir")
     if logs_dir:
-        ld = Path(logs_dir).expanduser()
+        ld = _resolve_path(logs_dir, base_dir)
         ld.mkdir(parents=True, exist_ok=True)
-        logs_dir = str(ld.resolve())
+        logs_dir = str(ld)
+
+    sessions_dir = data.get("sessions_dir")
+    if sessions_dir:
+        sd = _resolve_path(sessions_dir, base_dir)
+        sd.mkdir(parents=True, exist_ok=True)
+        sessions_dir = str(sd)
 
     uploads_dir = data.get("uploads_dir")
     if uploads_dir:
-        ud = Path(uploads_dir).expanduser()
+        ud = _resolve_path(uploads_dir, base_dir)
         ud.mkdir(parents=True, exist_ok=True)
-        uploads_dir = str(ud.resolve())
+        uploads_dir = str(ud)
 
     commands_dir = data.get("commands_dir")
     if commands_dir:
-        cd = Path(commands_dir).expanduser()
+        cd = _resolve_path(commands_dir, base_dir)
         if not cd.is_dir():
             raise ValueError(
                 f"[{name}] commands_dir does not exist or is not a directory: {cd}"
             )
-        commands_dir = str(cd.resolve())
+        commands_dir = str(cd)
 
     def _parse_chat_id_list(field: str) -> tuple[int, ...]:
         raw = data.get(field)
@@ -342,6 +361,7 @@ def _build(name: str, data: dict[str, Any]) -> BotConfig:
         "pi_session_persistence": data.get("pi_session_persistence", False),
         "working_dir": working_dir,
         "logs_dir": logs_dir,
+        "sessions_dir": sessions_dir,
         "uploads_dir": uploads_dir,
         "commands_dir": commands_dir,
         "allowed_chat_ids": allowed_chat_ids,
@@ -401,16 +421,19 @@ def load(path: Path | str | None = None) -> dict[str, BotConfig]:
     if not isinstance(data, dict) or not data:
         raise ValueError(f"{p.name} is empty or not an object")
 
+    # Relative paths in the config resolve against the config file's directory.
+    base_dir = p.resolve().parent
+
     # Backward compat: if the top level has telegram_bot_token directly,
     # this is the flat (single-bot) format — wrap it under the name "default".
     if "telegram_bot_token" in data:
-        return {"default": _build("default", data)}
+        return {"default": _build("default", data, base_dir)}
 
     bots = {}
     for name, cfg in data.items():
         if not isinstance(cfg, dict):
             raise ValueError(f"[{name}] bot config must be an object")
-        bots[name] = _build(name, cfg)
+        bots[name] = _build(name, cfg, base_dir)
     if not bots:
         raise ValueError(f"{p.name} has no bot entries")
     return bots

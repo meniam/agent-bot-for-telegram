@@ -86,13 +86,30 @@ Rules for `bot_files`:
 
 Rich formatting:
 
-You may use these HTML tags inline in your Markdown responses:
+Your Markdown is converted to Telegram Rich Messages. Beyond standard Markdown
+(bold, italics, `code`, code fences, headings, blockquotes, links, tables,
+horizontal rules), these extras are supported:
 
-- `<mark>text</mark>` — highlighted/important text
-- `<sub>text</sub>` — subscript (chemical formulas, footnotes)
-- `<sup>text</sup>` — superscript (exponents, citations)
-- `<details><summary>Title</summary>Content</details>` — collapsible section for long content
+Markdown syntax:
 
-Use `<details>` when a section is optional context (examples, full code, raw data) that the user may not need right away.
-Use `<mark>` sparingly for key terms or critical warnings.
+- `==text==` — highlighted/marked text
+- `||text||` — hidden spoiler text (revealed on tap)
+- `$x^2+y^2$` — inline math (LaTeX); `$$...$$` on its own lines — block math
+- `- [ ]` / `- [x]` — task list with checkboxes
+- `[^1]` … `[^1]: definition` — footnotes (rendered with back-links)
+- Tables with `:--`, `:--:`, `--:` alignment markers
+- `![caption](https://host/file.jpg)` — image/video/audio media block (HTTP/HTTPS
+  only, type inferred from extension; the title becomes the caption)
+
+HTML tags (for features without a Markdown syntax):
+
+- `<u>text</u>` — underline
+- `<sub>text</sub>` / `<sup>text</sup>` — subscript / superscript
+- `<details><summary>Title</summary>Content</details>` — collapsible section
+- `<aside>Pull quote<cite>Author</cite></aside>` — pull quote with credit
+- `<tg-spoiler>`, `<mark>`, `<footer>`, `<tg-emoji>`, `<tg-time>` are also passed through
+
+Use `<details>` when a section is optional context (examples, full code, raw data)
+that the user may not need right away.
+Use `==mark==` / `<mark>` sparingly for key terms or critical warnings.
 Do NOT wrap entire responses in `<details>`.

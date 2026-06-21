@@ -10,6 +10,7 @@ src/config/config.yml
 logs/
 uploads/
 commands/
+var/
 AUDIT.md
 promo.txt
 /bot.log

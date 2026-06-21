@@ -7,12 +7,23 @@ across bots.
 import html
 import logging
 import re
+from urllib.parse import urlsplit
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InputRichMessage, Message
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.tasklists import tasklists_plugin
+
+from ._inline_marks import (
+    mark_postprocess,
+    mark_tokenize,
+    spoiler_postprocess,
+    spoiler_tokenize,
+)
 
 log = logging.getLogger(__name__)
 
@@ -21,11 +32,41 @@ TG_LIMIT = 4000
 _md = MarkdownIt()
 _md.enable("strikethrough")
 _md.enable("table")
+_md.use(footnote_plugin)
+_md.use(dollarmath_plugin)
+_md.use(tasklists_plugin)
+_md.inline.ruler.before("strikethrough", "spoiler", spoiler_tokenize)
+_md.inline.ruler.before("strikethrough", "mark", mark_tokenize)
+_md.inline.ruler2.after("strikethrough", "spoiler", spoiler_postprocess)
+_md.inline.ruler2.after("strikethrough", "mark", mark_postprocess)
+# `|` and `=` are not default inline terminators, so the text rule would
+# otherwise swallow `||`/`==` before the spoiler/mark rules see them.
+_md.inline.add_terminator_char("|")
+_md.inline.add_terminator_char("=")
 
-_SAFE_TAG_RE = re.compile(
-    r"</?(?:mark|sub|sup|details|summary|tg-spoiler)(?:\s[^>]*)?>",
-    re.IGNORECASE,
-)
+# Media kinds keyed by file extension (Telegram media blocks accept HTTP/HTTPS
+# URLs only; type is inferred from the extension).
+_IMG_EXT = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+_VIDEO_EXT = frozenset({".mp4", ".mov", ".m4v", ".gif"})
+_AUDIO_EXT = frozenset({".mp3", ".ogg", ".oga", ".m4a", ".wav", ".opus", ".flac"})
+
+# Full set of HTML tag names Telegram renders in Rich Messages. Raw HTML the
+# agent writes for features without a Markdown syntax (underline, pull quotes,
+# maps, custom emoji, anchors, …) is passed through; everything else is escaped.
+_SAFE_TAGS = frozenset({
+    "a", "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
+    "code", "pre", "mark", "sub", "sup", "tg-spoiler",
+    "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr",
+    "ul", "ol", "li", "input",
+    "blockquote", "aside", "cite", "footer",
+    "table", "caption", "tr", "th", "td",
+    "details", "summary",
+    "figure", "figcaption", "img", "video", "audio",
+    "tg-emoji", "tg-time", "tg-math", "tg-math-block",
+    "tg-map", "tg-collage", "tg-slideshow", "tg-reference",
+})
+
+_TAG_NAME_RE = re.compile(r"</?\s*([a-zA-Z][a-zA-Z0-9-]*)")
 
 
 def _passthrough_safe_tags(raw: str) -> str:
@@ -35,11 +76,45 @@ def _passthrough_safe_tags(raw: str) -> str:
     for m in re.finditer(r"<[^>]+>", raw):
         parts.append(html.escape(raw[pos : m.start()]))
         tag = m.group(0)
-        if _SAFE_TAG_RE.fullmatch(tag):
+        name_m = _TAG_NAME_RE.match(tag)
+        if name_m and name_m.group(1).lower() in _SAFE_TAGS:
             parts.append(tag)
         pos = m.end()
     parts.append(html.escape(raw[pos:]))
     return "".join(parts)
+
+
+def _media_block(node: SyntaxTreeNode) -> str | None:
+    """Render an image node as a Telegram media block, or None if it is not a
+    standalone HTTP(S) media URL we can map to img/video/audio."""
+    src = str(node.attrGet("src") or "")
+    scheme = urlsplit(src).scheme.lower()
+    if scheme not in ("http", "https"):
+        return None
+    path = urlsplit(src).path.lower()
+    ext = path[path.rfind(".") :] if "." in path else ""
+    if ext in _IMG_EXT:
+        media = f'<img src="{html.escape(src, quote=True)}"/>'
+    elif ext in _VIDEO_EXT:
+        media = f'<video src="{html.escape(src, quote=True)}"></video>'
+    elif ext in _AUDIO_EXT:
+        media = f'<audio src="{html.escape(src, quote=True)}"></audio>'
+    else:
+        return None
+    caption = str(node.attrGet("title") or "").strip()
+    if caption:
+        return (
+            f"<figure>{media}"
+            f"<figcaption>{html.escape(caption)}</figcaption></figure>"
+        )
+    return media
+
+
+def _cell_align(node: SyntaxTreeNode) -> str:
+    """Map a GFM table cell's `style="text-align:..."` to an `align` attribute."""
+    style = str(node.attrGet("style") or "")
+    m = re.search(r"text-align:\s*(left|center|right)", style)
+    return f' align="{m.group(1)}"' if m else ""
 
 
 def _render(node: SyntaxTreeNode) -> str:
@@ -68,6 +143,18 @@ def _render(node: SyntaxTreeNode) -> str:
     if t == "s":
         return f'<s>{"".join(_render(c) for c in ch)}</s>'
 
+    if t == "spoiler":
+        return f'<tg-spoiler>{"".join(_render(c) for c in ch)}</tg-spoiler>'
+
+    if t == "mark":
+        return f'<mark>{"".join(_render(c) for c in ch)}</mark>'
+
+    if t == "math_inline":
+        return f"<tg-math>{html.escape(node.content)}</tg-math>"
+
+    if t == "math_block":
+        return f"<tg-math-block>{html.escape(node.content.strip())}</tg-math-block>\n\n"
+
     if t == "code_inline":
         return f"<code>{html.escape(node.content)}</code>"
 
@@ -93,17 +180,12 @@ def _render(node: SyntaxTreeNode) -> str:
         return f'{"".join(_render(c) for c in ch)}\n\n'
 
     if t == "bullet_list":
-        return "".join(_render_list_item(c, prefix="•") for c in ch) + "\n"
+        return f"<ul>{''.join(_render_list_item(c) for c in ch)}</ul>\n\n"
 
     if t == "ordered_list":
         start = int(node.attrGet("start") or 1)
-        return (
-            "".join(
-                _render_list_item(c, prefix=f"{int(c.info) if c.info else start + i}.")
-                for i, c in enumerate(ch)
-            )
-            + "\n"
-        )
+        attr = f' start="{start}"' if start != 1 else ""
+        return f"<ol{attr}>{''.join(_render_list_item(c) for c in ch)}</ol>\n\n"
 
     if t == "blockquote":
         inner = "".join(_render(c) for c in ch).strip()
@@ -115,7 +197,13 @@ def _render(node: SyntaxTreeNode) -> str:
         return f'<a href="{url}">{inner}</a>'
 
     if t == "image":
-        return html.escape(str(node.attrGet("alt") or ""))
+        block = _media_block(node)
+        if block is not None:
+            return block
+        # Non-HTTP(S) or unknown media type: fall back to the alt text
+        # (carried as the image node's children or `content`).
+        alt = "".join(_render(c) for c in ch) if ch else html.escape(node.content)
+        return alt
 
     if t == "hr":
         return "<hr>\n"
@@ -130,13 +218,36 @@ def _render(node: SyntaxTreeNode) -> str:
         return f"<tr>{''.join(_render(c) for c in ch)}</tr>\n"
 
     if t == "th":
-        return f"<th>{''.join(_render(c) for c in ch).strip()}</th>"
+        inner = "".join(_render(c) for c in ch).strip()
+        return f"<th{_cell_align(node)}>{inner}</th>"
 
     if t == "td":
-        return f"<td>{''.join(_render(c) for c in ch).strip()}</td>"
+        inner = "".join(_render(c) for c in ch).strip()
+        return f"<td{_cell_align(node)}>{inner}</td>"
+
+    if t == "math_block":  # handled above; guard for tree variants
+        return f"<tg-math-block>{html.escape(node.content.strip())}</tg-math-block>\n\n"
+
+    if t == "footnote_ref":
+        label = html.escape(str((node.meta or {}).get("label", "")))
+        return f'<sup><a href="#fn-{label}">{label}</a></sup>'
+
+    if t == "footnote_block":
+        return _render_footnotes(ch)
+
+    if t == "footnote_anchor":
+        return ""  # back-reference marker — not shown
 
     if t in ("html_block", "html_inline"):
-        return _passthrough_safe_tags(node.content)
+        raw = node.content
+        if _TASK_CHECKBOX_RE.search(raw):
+            checked = "checked" in raw.lower()
+            return (
+                '<input type="checkbox" checked>'
+                if checked
+                else '<input type="checkbox">'
+            )
+        return _passthrough_safe_tags(raw)
 
     if ch:
         return "".join(_render(c) for c in ch)
@@ -146,24 +257,71 @@ def _render(node: SyntaxTreeNode) -> str:
         return ""
 
 
-def _render_list_item(node: SyntaxTreeNode, *, prefix: str) -> str:
-    content_parts: list[str] = []
-    nested: list[str] = []
+_TASK_CHECKBOX_RE = re.compile(r"task-list-item-checkbox", re.IGNORECASE)
+
+
+def _render_list_item(node: SyntaxTreeNode) -> str:
+    """Render a `<li>`, converting GFM task-list checkboxes to clean inputs."""
+    parts: list[str] = []
     for child in node.children or []:
         if child.type in ("bullet_list", "ordered_list"):
-            nested.append(_render(child))
+            parts.append(_render(child))
         elif child.type == "paragraph":
-            content_parts.append("".join(_render(c) for c in child.children or []))
+            parts.append("".join(_render(c) for c in child.children or []))
         else:
-            content_parts.append(_render(child))
-    content = "".join(content_parts).strip()
-    return f"{prefix} {content}\n" + ("".join(nested) if nested else "")
+            parts.append(_render(child))
+    content = "".join(parts).strip()
+    return f"<li>{content}</li>"
+
+
+def _render_footnotes(footnotes: list[SyntaxTreeNode]) -> str:
+    """Render the footnote definitions block as an anchored `<footer>`."""
+    lines: list[str] = []
+    for fn in footnotes:
+        if fn.type != "footnote":
+            continue
+        label = html.escape(str((fn.meta or {}).get("label", "")))
+        inner = "".join(
+            "".join(_render(c) for c in child.children or [])
+            if child.type == "paragraph"
+            else _render(child)
+            for child in fn.children or []
+        ).strip()
+        lines.append(f'<a name="fn-{label}"></a>{label}. {inner}')
+    if not lines:
+        return ""
+    return "<footer>" + "<br>".join(lines) + "</footer>\n\n"
 
 
 def to_html(text: str) -> str:
     tokens = _md.parse(text)
     tree = SyntaxTreeNode(tokens)
     return _render(tree)
+
+
+# Rich Messages render real HTML, so literal newlines collapse to whitespace.
+# `<pre>` keeps newlines significant; `<table>` rows/cells own their layout.
+_PRE_OR_TABLE_RE = re.compile(r"<pre>.*?</pre>|<table>.*?</table>", re.DOTALL)
+
+
+def to_rich_html(text: str) -> str:
+    """`to_html` adapted for sendRichMessage: line breaks become `<br>`.
+
+    Unlike classic `parse_mode=HTML` (where `\\n` is a newline), Rich Message
+    HTML is rendered as a document — bare newlines turn into spaces. Convert
+    them to `<br>`, except inside `<pre>` (newlines are meaningful) and
+    `<table>` (drop the structural newlines between rows/cells).
+    """
+    converted = to_html(text)
+    out: list[str] = []
+    pos = 0
+    for m in _PRE_OR_TABLE_RE.finditer(converted):
+        out.append(converted[pos : m.start()].replace("\n", "<br>"))
+        seg = m.group(0)
+        out.append(seg.replace("\n", "") if seg.startswith("<table>") else seg)
+        pos = m.end()
+    out.append(converted[pos:].replace("\n", "<br>"))
+    return "".join(out)
 
 
 async def send_md(message: Message, text: str) -> None:
@@ -184,7 +342,7 @@ async def send_md_to_chat(bot: Bot, chat_id: int, text: str) -> None:
     Tries sendRichMessage with HTML first; on parse failure falls back to
     plain text so the user never sees raw escape artifacts.
     """
-    converted = to_html(text)
+    converted = to_rich_html(text)
     sent_any = False
     for i in range(0, len(converted), TG_LIMIT):
         chunk = converted[i : i + TG_LIMIT]

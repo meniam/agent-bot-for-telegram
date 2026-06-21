@@ -14,14 +14,21 @@ from claude_agent_sdk import (
     HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
+    ProcessError,
     StreamEvent,
     TextBlock,
     ToolPermissionContext,
+    query,
 )
 
 from .agent_types import StreamChunk, ToolEventCallback
+from .session_store import Session, SessionStore
 
 log = logging.getLogger(__name__)
+
+_TITLE_MAX_LEN = 60
+# Cyrillic prompt text is intentional; silence ambiguous-character lint.
+_TITLE_PROMPT = "Придумай короткий заголовок (3-5 слов) для диалога, начатого этим сообщением пользователя. Ответь только заголовком, без кавычек и пояснений.\n\nСообщение:\n"  # noqa: RUF001
 
 PermissionCallback = Callable[
     [int, str, dict[str, Any], ToolPermissionContext],
@@ -44,6 +51,7 @@ class ClaudeAgentBackend:
 
     def __init__(
         self,
+        session_store: SessionStore,
         on_permission: PermissionCallback | None = None,
         system_prompt: str = "You are a friendly Telegram assistant. Reply concisely.",
         cwd: str | None = None,
@@ -52,6 +60,7 @@ class ClaudeAgentBackend:
         on_tool_event: ToolEventCallback | None = None,
         initial_model: str | None = None,
     ) -> None:
+        self._store = session_store
         self._on_permission = on_permission
         self._system_prompt = system_prompt
         self._cwd = cwd
@@ -114,7 +123,13 @@ class ClaudeAgentBackend:
     def _lock(self, chat_id: int) -> asyncio.Lock:
         return self._locks.setdefault(chat_id, asyncio.Lock())
 
-    def _make_options(self, chat_id: int) -> ClaudeAgentOptions:
+    def _make_options(
+        self,
+        chat_id: int,
+        *,
+        session_id: str | None = None,
+        resume: str | None = None,
+    ) -> ClaudeAgentOptions:
         can_use_tool: (
             Callable[
                 [str, dict[str, Any], ToolPermissionContext],
@@ -187,6 +202,9 @@ class ClaudeAgentBackend:
                 ],
             }
 
+        def _on_stderr(line: str) -> None:
+            log.warning("claude cli stderr (chat_id=%s): %s", chat_id, line.rstrip())
+
         return ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             include_partial_messages=True,
@@ -195,17 +213,47 @@ class ClaudeAgentBackend:
             add_dirs=list(self._add_dirs),
             setting_sources=["user", "project", "local"],
             hooks=cast(Any, hooks),
+            session_id=session_id,
+            resume=resume,
+            stderr=_on_stderr,
         )
 
     async def _get_client(self, chat_id: int) -> ClaudeSDKClient:
         self._ensure_gc_running()
         entry = self._clients.get(chat_id)
         if entry is None:
-            client = ClaudeSDKClient(options=self._make_options(chat_id))
-            await client.__aenter__()
+            # No live client: resume the chat's current persisted session, or
+            # mint a new one if this chat has never talked before.
+            sid = self._store.current_id(chat_id)
+            if sid is not None:
+                options = self._make_options(chat_id, resume=sid)
+            else:
+                sid = self._store.create(chat_id).id
+                options = self._make_options(chat_id, session_id=sid)
+            client = ClaudeSDKClient(options=options)
+            try:
+                await client.__aenter__()
+            except ProcessError:
+                # Resume target is missing/corrupt (CLI exits 1: "No
+                # conversation found"). Drop it and mint a fresh session so the
+                # chat keeps working instead of dead-ending on internal error.
+                if options.resume is None:
+                    raise
+                log.warning(
+                    "resume failed for chat_id=%s session=%s; minting fresh",
+                    chat_id,
+                    sid,
+                )
+                with contextlib.suppress(Exception):
+                    await client.__aexit__(None, None, None)
+                sid = self._store.create(chat_id).id
+                options = self._make_options(chat_id, session_id=sid)
+                client = ClaudeSDKClient(options=options)
+                await client.__aenter__()
             if self._initial_model:
                 await client.set_model(self._initial_model)
                 self._models[chat_id] = self._initial_model
+            self._store.touch(chat_id, sid)
         else:
             client, _ = entry
         self._clients[chat_id] = (client, time.monotonic())
@@ -294,14 +342,82 @@ class ClaudeAgentBackend:
     def has_session(self, chat_id: int) -> bool:
         return chat_id in self._clients
 
+    async def _drop_client(self, chat_id: int) -> None:
+        """Close and forget the live SDK client (caller holds the lock)."""
+        self._modes.pop(chat_id, None)
+        self._models.pop(chat_id, None)
+        entry = self._clients.pop(chat_id, None)
+        if entry is not None:
+            client, _ = entry
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                log.exception("failed to close client for chat_id=%s", chat_id)
+
+    async def new_session(self, chat_id: int) -> Session:
+        """Start a fresh session; the previous one stays in the list."""
+        async with self._lock(chat_id):
+            await self._drop_client(chat_id)
+            return self._store.create(chat_id)
+
+    async def switch_session(self, chat_id: int, sid: str) -> Session | None:
+        """Make the given session current; next turn resumes its history."""
+        async with self._lock(chat_id):
+            session = self._store.get_by_id(chat_id, sid)
+            if session is None:
+                return None
+            await self._drop_client(chat_id)
+            self._store.set_current(chat_id, session.id)
+            return session
+
+    async def delete_session(self, chat_id: int, sid: str) -> Session | None:
+        """Delete the given session. If it was current, drop the live client so
+        the next turn resumes the new current. Returns the deleted session, or
+        None if the id is unknown."""
+        async with self._lock(chat_id):
+            target = self._store.get_by_id(chat_id, sid)
+            if target is None:
+                return None
+            if self._store.current_id(chat_id) == target.id:
+                await self._drop_client(chat_id)
+            self._store.delete(chat_id, target.id)
+            return target
+
+    def list_sessions(self, chat_id: int) -> list[Session]:
+        return self._store.all_sessions(chat_id)
+
+    def current_session(self, chat_id: int) -> Session | None:
+        return self._store.current(chat_id)
+
+    async def generate_title(self, text: str) -> str | None:
+        """One-shot Haiku call to name a session. Returns None on failure."""
+        prompt = _TITLE_PROMPT + text[:2000]
+        # Stay on the bot's configured model/provider; never assume a specific
+        # model (e.g. Haiku) is available on this account. None → CLI default.
+        options = ClaudeAgentOptions(
+            model=self._initial_model,
+            max_turns=1,
+            cwd=self._cwd,
+            allowed_tools=[],
+        )
+        parts: list[str] = []
+        try:
+            async for msg in query(prompt=prompt, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            parts.append(block.text)
+        except Exception:
+            log.exception("generate_title failed")
+            return None
+        title = " ".join("".join(parts).split()).strip().strip('"')
+        if not title:
+            return None
+        return title[:_TITLE_MAX_LEN]
+
     async def reset(self, chat_id: int) -> None:
         async with self._lock(chat_id):
-            self._modes.pop(chat_id, None)
-            self._models.pop(chat_id, None)
-            entry = self._clients.pop(chat_id, None)
-            if entry is not None:
-                client, _ = entry
-                await client.__aexit__(None, None, None)
+            await self._drop_client(chat_id)
         self._locks.pop(chat_id, None)
 
     async def close_all(self) -> None:

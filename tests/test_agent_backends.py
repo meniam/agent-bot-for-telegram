@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,11 @@ from src.infra.agent_factory import create_agent_backend
 from src.infra.claude_agent import ClaudeAgentBackend
 from src.infra.codex_agent import CodexAgentBackend
 from src.infra.pi_agent import PiAgentBackend
+from src.infra.session_store import SessionStore
+
+
+def _store() -> SessionStore:
+    return SessionStore(Path(tempfile.mkdtemp()), default_title="Новая сессия")
 
 
 def _cfg(**overrides: object) -> BotConfig:
@@ -25,6 +31,7 @@ def _cfg(**overrides: object) -> BotConfig:
 def test_factory_creates_claude_backend_by_default() -> None:
     backend = create_agent_backend(
         _cfg(),
+        session_store=_store(),
         on_permission=None,
         system_prompt="x",
         add_dirs=[],
@@ -36,6 +43,7 @@ def test_factory_creates_claude_backend_by_default() -> None:
 def test_factory_creates_codex_backend() -> None:
     backend = create_agent_backend(
         _cfg(agent_provider="codex"),
+        session_store=_store(),
         on_permission=None,
         system_prompt="x",
         add_dirs=[],
@@ -48,6 +56,7 @@ def test_factory_creates_codex_backend() -> None:
 def test_factory_creates_pi_backend() -> None:
     backend = create_agent_backend(
         _cfg(agent_provider="pi"),
+        session_store=_store(),
         on_permission=None,
         system_prompt="x",
         add_dirs=[],
@@ -55,6 +64,46 @@ def test_factory_creates_pi_backend() -> None:
         pi_transport_factory=lambda _model: _FakePiTransport(),
     )
     assert isinstance(backend, PiAgentBackend)
+
+
+def test_claude_resume_failure_falls_back_to_fresh_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from claude_agent_sdk import ProcessError
+
+    import src.infra.claude_agent as claude_module
+
+    created: list[Any] = []
+
+    class _FakeClient:
+        def __init__(self, options: Any) -> None:
+            self.options = options
+            created.append(self)
+
+        async def __aenter__(self) -> "_FakeClient":
+            if self.options.resume is not None:
+                raise ProcessError("boom", exit_code=1)
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(claude_module, "ClaudeSDKClient", _FakeClient)
+
+    store = _store()
+    store.set_current(42, "missing-session-id")
+    backend = ClaudeAgentBackend(store, system_prompt="x", idle_ttl_sec=0)
+
+    client = asyncio.run(backend._get_client(42))
+
+    # Resume client built first (raised), fresh session client built second.
+    assert len(created) == 2
+    assert created[0].options.resume == "missing-session-id"
+    assert created[1].options.resume is None
+    assert created[1].options.session_id is not None
+    assert client is created[1]
+    # Store now points at the freshly minted session, not the broken one.
+    assert store.current_id(42) == created[1].options.session_id
 
 
 class _FakeResult:
@@ -398,6 +447,7 @@ async def test_codex_backend_thread_lifecycle_and_stream() -> None:
     events: list[tuple[int, str, str, dict[str, Any]]] = []
     fake = _StreamingCodex()
     backend = CodexAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         on_tool_event=lambda *args: _record(events, *args),
         codex_factory=lambda: fake,
@@ -430,6 +480,7 @@ async def test_codex_backend_thread_lifecycle_and_stream() -> None:
 async def test_codex_backend_passes_working_dir_to_thread_start() -> None:
     fake = _FakeCodex()
     backend = CodexAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         cwd="/Users/example/Brain",
         initial_model="gpt-5.5",
@@ -454,6 +505,7 @@ async def test_codex_backend_times_out_silent_run(
     fake = _SlowCodex()
     monkeypatch.setattr(codex_agent_module, "CODEX_RUN_TIMEOUT_SEC", 0.01)
     backend = CodexAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         on_tool_event=lambda *args: _record(events, *args),
         codex_factory=lambda: fake,
@@ -473,6 +525,7 @@ async def test_codex_backend_times_out_silent_run(
 async def test_codex_reset_force_closes_active_session() -> None:
     fake = _SlowCodex()
     backend = CodexAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         codex_factory=lambda: fake,
     )
@@ -502,6 +555,7 @@ async def test_pi_backend_streams_events_and_tool_status() -> None:
     events: list[tuple[int, str, str, dict[str, Any]]] = []
     fake = _FakePiTransport()
     backend = PiAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         tools_mode="default",
         on_tool_event=lambda *args: _record(events, *args),
@@ -527,6 +581,7 @@ async def test_pi_backend_streams_events_and_tool_status() -> None:
 async def test_pi_backend_context_info_model_and_reset() -> None:
     fake = _FakePiTransport()
     backend = PiAgentBackend(
+        session_store=_store(),
         system_prompt="system",
         initial_model=None,
         tools_mode="read_only",
@@ -570,6 +625,7 @@ async def test_pi_backend_sends_image_attachments(tmp_path: Path) -> None:
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
     fake = _FakePiTransport()
     backend = PiAgentBackend(
+        session_store=_store(),
         system_prompt="",
         transport_factory=lambda _model: fake,
     )
@@ -600,6 +656,7 @@ async def test_pi_backend_times_out_silent_event_stream(
     fake = _SilentPiTransport()
     monkeypatch.setattr(pi_agent_module, "PI_EVENT_TIMEOUT_SEC", 0.01)
     backend = PiAgentBackend(
+        session_store=_store(),
         system_prompt="",
         on_tool_event=lambda *args: _record(events, *args),
         transport_factory=lambda _model: fake,
@@ -623,6 +680,7 @@ async def test_pi_backend_times_out_silent_event_stream(
 async def test_pi_reset_force_closes_active_session() -> None:
     fake = _ClosableSilentPiTransport()
     backend = PiAgentBackend(
+        session_store=_store(),
         system_prompt="",
         transport_factory=lambda _model: fake,
     )

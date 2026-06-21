@@ -20,8 +20,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
+from .session_store import Session, SessionStore
 
 log = logging.getLogger(__name__)
+
+# PI's RPC mode has no resume primitive exposed here, so switching/restoring a
+# session just resets the live process; history is not replayed. See AGENTS.md.
+_TITLE_MAX_LEN = 60
 
 PI_MODES: tuple[str, ...] = ("default", "read_only", "no_tools", "plan")
 PI_MODELS: tuple[tuple[str, str], ...] = (("", ""),)
@@ -181,6 +186,7 @@ class PiAgentBackend:
     def __init__(
         self,
         *,
+        session_store: SessionStore,
         system_prompt: str,
         cwd: str | None = None,
         idle_ttl_sec: int = 86400,
@@ -192,6 +198,7 @@ class PiAgentBackend:
         session_persistence: bool = False,
         transport_factory: Callable[[str | None], PiRpcTransport] | None = None,
     ) -> None:
+        self._store = session_store
         self._system_prompt = system_prompt
         self._cwd = cwd
         self._idle_ttl = idle_ttl_sec
@@ -600,6 +607,37 @@ class PiAgentBackend:
 
     def has_session(self, chat_id: int) -> bool:
         return chat_id in self._sessions
+
+    async def new_session(self, chat_id: int) -> Session:
+        await self.reset(chat_id)
+        return self._store.create(chat_id)
+
+    async def switch_session(self, chat_id: int, sid: str) -> Session | None:
+        session = self._store.get_by_id(chat_id, sid)
+        if session is None:
+            return None
+        await self.reset(chat_id)
+        self._store.set_current(chat_id, session.id)
+        return session
+
+    async def delete_session(self, chat_id: int, sid: str) -> Session | None:
+        target = self._store.get_by_id(chat_id, sid)
+        if target is None:
+            return None
+        if self._store.current_id(chat_id) == target.id:
+            await self.reset(chat_id)
+        self._store.delete(chat_id, target.id)
+        return target
+
+    def list_sessions(self, chat_id: int) -> list[Session]:
+        return self._store.all_sessions(chat_id)
+
+    def current_session(self, chat_id: int) -> Session | None:
+        return self._store.current(chat_id)
+
+    async def generate_title(self, text: str) -> str | None:
+        title = " ".join(text.split())[:_TITLE_MAX_LEN].strip()
+        return title or None
 
     async def reset(self, chat_id: int) -> None:
         lock = self._locks.get(chat_id)

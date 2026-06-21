@@ -8,7 +8,17 @@ filters (including the user-defined ones) MUST be registered before it.
 from aiogram import Dispatcher
 
 from ..infra.commands import CommandDef
-from . import basic, custom, plan, questionnaire, selectors, text, uploads, voice
+from . import (
+    basic,
+    custom,
+    plan,
+    questionnaire,
+    selectors,
+    sessions,
+    text,
+    uploads,
+    voice,
+)
 
 
 def register_all(
@@ -18,6 +28,7 @@ def register_all(
     # Exact Command(...) filters — order between these is irrelevant.
     selectors.register(dp)
     basic.register(dp)
+    sessions.register(dp)
     plan.register(dp)
     questionnaire.register(dp)
     # User-defined commands MUST come before F.text so `/<name>` does not

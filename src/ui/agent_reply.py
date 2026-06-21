@@ -18,6 +18,10 @@ from .file_delivery import parse_file_delivery, send_file_delivery
 from .markdown import send_md
 from .questionnaire import parse_questionnaire, render_questionnaire
 
+# Strong refs to background title-generation tasks so they are not GC'd
+# mid-flight (asyncio only keeps weak references to running tasks).
+_bg_tasks: set[asyncio.Task[None]] = set()
+
 
 def _user_context_prefix(user: User | None, chat_id: int) -> str:
     if user is None:
@@ -45,9 +49,33 @@ async def react_to(ctx: BotContext, message: Message, text: str) -> None:
         ctx.glog.exception("[%s] reaction failed", ctx.cfg.name)
 
 
+async def _name_session_in_background(
+    ctx: BotContext, chat_id: int, user_text: str, cl: logging.Logger
+) -> None:
+    """If the current session is still unnamed, ask the LLM for a title."""
+    session = ctx.agent.current_session(chat_id)
+    if session is None or session.auto_titled or not user_text.strip():
+        return
+
+    async def _run() -> None:
+        try:
+            title = await ctx.agent.generate_title(user_text)
+        except Exception as e:
+            cl.warning("session title generation failed: %s", e)
+            return
+        if title:
+            ctx.sessions.set_title(chat_id, session.id, title)
+            cl.info("session %s titled: %s", session.id, title)
+
+    task = asyncio.create_task(_run())
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
 async def reply_with_agent(
     ctx: BotContext, message: Message, prompt: str, cl: logging.Logger
 ) -> None:
+    user_text = prompt
     if not ctx.agent.has_session(message.chat.id):
         prefix = _user_context_prefix(message.from_user, message.chat.id)
         prompt = prefix + prompt
@@ -94,6 +122,7 @@ async def reply_with_agent(
             message, ctx.tr.t("error_internal", error=type(e).__name__)
         )
         return
+    await _name_session_in_background(ctx, message.chat.id, user_text, cl)
     final = answer.strip() or ctx.tr.t("empty_answer")
     delivery = parse_file_delivery(final)
     if delivery is not None:

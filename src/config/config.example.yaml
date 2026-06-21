@@ -7,9 +7,11 @@ brain:
     # Bot UI language from src/i18n, for example ru or en.
     lang: ru
     # Directory for bot.log and per-chat log files.
-    logs_dir: /var/log/telegram-agent-bot
+    logs_dir: ../../var/brain/log
+    # Directory for per-chat session metadata; null uses var/sessions.
+    sessions_dir: ../../var/brain/sessions
     # Directory with custom slash-command .md files.
-    commands_dir: /etc/telegram-agent-bot/commands
+    commands_dir: ../../var/brain/commands
     # Minimum delay between Telegram draft updates while the agent streams.
     draft_interval_sec: 0.2
     # Seconds to wait for permission, plan, and question button clicks.
@@ -59,7 +61,7 @@ brain:
     # Hard timeout for one agent turn, including tool calls and approvals.
     agent_timeout_sec: 600
     # Close idle per-chat sessions after this many seconds; 0 disables GC.
-    session_idle_ttl_sec: 86400
+    session_idle_ttl_sec: 2592000
 
   # Backend-specific options; ignored unless that provider is selected.
   providers:

@@ -7,7 +7,7 @@ import logging
 
 from aiogram import Dispatcher
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import BotCommand, Message
 
 from ..ui.markdown import send_md
 from ..ui.sdk_views import (
@@ -22,6 +22,14 @@ _HELP_EXAMPLES = frozenset(
     ("plan", "mode", "model", "stop", "context", "mcp", "info")
 )
 
+# `/help` layout: ordered groups of built-in commands. Anything not listed
+# here (i.e. user-defined custom commands) is rendered under a final group.
+_HELP_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("help_group_sessions", ("new", "sess")),
+    ("help_group_agent", ("plan", "mode", "model", "stop", "context", "cancel")),
+    ("help_group_info", ("start", "mcp", "info", "whoami", "help")),
+)
+
 
 async def start(message: Message, ctx: BotContext, **_: object) -> None:
     await send_md(message, ctx.tr.t("start_greeting"))
@@ -30,10 +38,10 @@ async def start(message: Message, ctx: BotContext, **_: object) -> None:
 async def new_session(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
-    await ctx.agent.reset(message.chat.id)
+    session = await ctx.agent.new_session(message.chat.id)
     ctx.plan_router.disarm(message.chat.id)
     await ctx.gate.cancel_active_aq(message.chat.id)
-    cl.info("session reset by /new")
+    cl.info("new session created by /new: %s", session.id)
     await send_md(message, ctx.tr.t("new_session_confirmation"))
 
 
@@ -69,7 +77,15 @@ async def show_context(
         usage.get("maxTokens"),
         usage.get("model"),
     )
-    await send_md(message, format_context_usage(usage, ctx.tr))
+    await send_md(
+        message,
+        format_context_usage(
+            usage,
+            ctx.tr,
+            provider=ctx.agent.provider,
+            model=ctx.agent.current_model(message.chat.id),
+        ),
+    )
 
 
 async def stop_query(
@@ -135,11 +151,32 @@ async def whoami(message: Message, ctx: BotContext, **_: object) -> None:
         "whoami_session_yes" if ctx.agent.has_session(chat_id)
         else "whoami_session_no"
     )
+    user = message.from_user
+    none = ctx.tr.t("whoami_none")
+    if user is not None:
+        user_id = str(user.id)
+        username = f"@{user.username}" if user.username else none
+        name = " ".join(
+            filter(None, [user.first_name, user.last_name])
+        ) or none
+        lang = user.language_code or none
+        premium = (
+            ctx.tr.t("whoami_yes") if user.is_premium
+            else ctx.tr.t("whoami_no")
+        )
+    else:
+        user_id = username = name = lang = none
+        premium = none
     await send_md(
         message,
         ctx.tr.t(
             "whoami_body",
             chat_id=chat_id,
+            user_id=user_id,
+            username=username,
+            name=name,
+            lang=lang,
+            premium=premium,
             access=access,
             mode=mode,
             session=ctx.tr.t(session_key),
@@ -147,16 +184,36 @@ async def whoami(message: Message, ctx: BotContext, **_: object) -> None:
     )
 
 
+def _help_item(ctx: BotContext, bc: BotCommand) -> str:
+    line = f"**/{bc.command}** — {bc.description}"
+    if bc.command in _HELP_EXAMPLES:
+        key = f"help_example_{bc.command}"
+        ex = ctx.tr.t(key)
+        if ex and ex != key:
+            line += f" — _{ex}_"
+    return line
+
+
 async def show_help(message: Message, ctx: BotContext, **_: object) -> None:
-    lines = [ctx.tr.t("help_header"), ""]
-    for bc in ctx.bot_command_list:
-        lines.append(f"/{bc.command} — {bc.description}")
-        if bc.command in _HELP_EXAMPLES:
-            key = f"help_example_{bc.command}"
-            ex = ctx.tr.t(key)
-            if ex and ex != key:
-                lines.append(f"   _{ex}_")
-    await send_md(message, "\n".join(lines))
+    # Inline-bold headers + single-newline item lines keep the layout compact:
+    # `##`/`-` would render as block elements (h2/ul/li) whose Rich Message
+    # margins stack into large vertical gaps.
+    by_name = {bc.command: bc for bc in ctx.bot_command_list}
+    grouped: set[str] = set()
+    sections: list[str] = [f"**{ctx.tr.t('help_header')}**"]
+
+    for header_key, names in _HELP_GROUPS:
+        items = [_help_item(ctx, by_name[n]) for n in names if n in by_name]
+        grouped.update(n for n in names if n in by_name)
+        if items:
+            sections.append(f"**{ctx.tr.t(header_key)}**\n" + "\n".join(items))
+
+    # Anything left is a user-defined custom command.
+    custom = [_help_item(ctx, bc) for bc in ctx.bot_command_list if bc.command not in grouped]
+    if custom:
+        sections.append(f"**{ctx.tr.t('help_group_custom')}**\n" + "\n".join(custom))
+
+    await send_md(message, "\n\n".join(sections))
 
 
 def register(dp: Dispatcher) -> None:

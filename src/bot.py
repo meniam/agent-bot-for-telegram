@@ -33,6 +33,7 @@ from .infra.agent_factory import create_agent_backend
 from .infra.commands import CommandDef, load_commands
 from .infra.interactions import TelegramInteractionGate
 from .infra.logs import BotLogs, setup_console
+from .infra.session_store import SessionStore
 from .infra.streaming import DraftStreamer
 from .services.transcribe import GroqTranscriber
 from .services.upload_store import UploadStore
@@ -44,6 +45,7 @@ from .ui.reactions import ReactionPicker
 from .ui.tool_status import ToolStatusMirror
 
 BUILTIN_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "system_prompt.md"
+SESSIONS_DIR = Path(__file__).resolve().parent.parent / "var" / "sessions"
 
 
 def _build_bot_command_list(
@@ -52,6 +54,7 @@ def _build_bot_command_list(
     builtin = [
         BotCommand(command="start",   description=tr.t("bot_command_start")),
         BotCommand(command="new",     description=tr.t("bot_command_new")),
+        BotCommand(command="sess",    description=tr.t("bot_command_sess")),
         BotCommand(command="context", description=tr.t("bot_command_context")),
         BotCommand(command="plan",    description=tr.t("bot_command_plan")),
         BotCommand(command="cancel",  description=tr.t("bot_command_cancel")),
@@ -191,6 +194,13 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     reaction_picker = ReactionPicker.from_translator(tr)
     is_allowed = _make_acl(cfg, glog)
 
+    sessions_base = Path(cfg.sessions_dir) if cfg.sessions_dir else SESSIONS_DIR
+    sessions = SessionStore(
+        sessions_base / cfg.name,
+        default_title=tr.t("session_default_title"),
+    )
+    glog.info("[%s] sessions: %s", cfg.name, sessions_base / cfg.name)
+
     streamer = DraftStreamer(
         bot,
         interval_sec=cfg.draft_interval_sec,
@@ -216,6 +226,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         glog.info("[%s] agent_model: %s", cfg.name, cfg.agent_model)
     agent = create_agent_backend(
         cfg,
+        session_store=sessions,
         on_permission=gate.can_use_tool,
         system_prompt=system_prompt,
         add_dirs=add_dirs,
@@ -236,6 +247,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         glog=glog,
         bot_logs=bot_logs,
         agent=agent,
+        sessions=sessions,
         gate=gate,
         streamer=streamer,
         tool_mirror=tool_mirror,

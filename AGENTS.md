@@ -103,6 +103,13 @@ Important optional features:
 - `commands_dir: null` disables custom slash commands.
 - configured `uploads_dir` is also passed to Claude SDK `add_dirs`.
 - `system_prompt: null` falls back to i18n key `default_system_prompt`.
+- `sessions_dir: null` uses `var/sessions`; set it to relocate per-chat
+  session metadata.
+
+Path fields (`working_dir`, `logs_dir`, `sessions_dir`, `uploads_dir`,
+`commands_dir`) expand `~` and resolve **relative to the config file's
+directory** (`src/config/`), not the process CWD. Absolute paths pass
+through unchanged.
 
 Env overrides:
 
@@ -150,9 +157,10 @@ Input flow essentials:
 
 ## Slash Commands
 
-Built-ins live in `handlers/basic.py`, `handlers/plan.py`, and
-`handlers/selectors.py`: `/start`, `/new`, `/cancel`, `/context`, `/stop`,
-`/mode`, `/model`, `/plan`, `/mcp`, `/info`, `/whoami`, `/help`.
+Built-ins live in `handlers/basic.py`, `handlers/plan.py`,
+`handlers/selectors.py`, and `handlers/sessions.py`: `/start`, `/new`,
+`/sess`, `/cancel`, `/context`, `/stop`, `/mode`, `/model`, `/plan`, `/mcp`,
+`/info`, `/whoami`, `/help`.
 
 Custom commands are `*.md` files in `commands_dir`. Each file is one command.
 Frontmatter supports `name:` and `description:`. The body is sent to Claude as
@@ -199,8 +207,34 @@ The active `AgentBackend` keeps one live SDK session/thread per chat,
 serializes turns with per-chat locks, mirrors selected mode/model state, and
 closes or drops idle sessions when `session_idle_ttl_sec > 0`.
 
-`/new` resets the session. `/stop` interrupts a running turn without taking the
-per-chat lock.
+### Multi-session per chat
+
+Each chat owns several **named** sessions. The meta layer is `SessionStore`
+(`infra/session_store.py`): one JSON file per chat at
+`var/sessions/<bot_name>/<chat_id>.json` listing sessions (`id`, `title`,
+`auto_titled`, timestamps) plus a `current` pointer. `var/` is gitignored.
+
+The Claude SDK already persists conversation history on disk keyed by
+`session_id` (UUID); the bot reuses that: a new session is created with
+`options.session_id=<uuid>`, an existing one is reopened with
+`options.resume=<uuid>`. So switching sessions and surviving a restart need
+only swap which UUID the next `_get_client` uses — no history copying.
+
+- `/new` starts a fresh session; the previous one stays in the list (it is no
+  longer destroyed).
+- `/sess` lists open sessions (current marked); `/sess <n>` switches to the
+  nth listed session (1-based ordinal, ordered by creation).
+- "Pick up last session" is **lazy**: Telegram polling gives no chat list, so
+  the first message from a chat after a restart resumes that chat's `current`
+  session via `resume`.
+- After the first message in an unnamed session, a cheap one-shot Haiku call
+  (`generate_title`) names it in the background (`auto_titled` then `true`).
+- **Codex/PI limitation:** these backends have no resume primitive wired here,
+  so `new_session`/`switch_session` reset the live session and update the
+  store, but do not replay history; `generate_title` falls back to a truncated
+  prompt.
+
+`/stop` interrupts a running turn without taking the per-chat lock.
 
 `DraftStreamer` uses Telegram `sendMessageDraft` while SDK partial messages
 stream. Final replies go through MarkdownV2 conversion, chunking, and plain-text

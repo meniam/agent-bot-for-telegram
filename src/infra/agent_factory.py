@@ -14,6 +14,7 @@ from .agent_types import AgentBackend, ToolEventCallback
 from .claude_agent import ClaudeAgentBackend
 from .codex_agent import CodexAgentBackend
 from .pi_agent import PiAgentBackend
+from .session_store import SessionStore
 
 PermissionCallback = Callable[
     [int, str, dict[str, Any], ToolPermissionContext],
@@ -24,6 +25,7 @@ PermissionCallback = Callable[
 def create_agent_backend(
     cfg: BotConfig,
     *,
+    session_store: SessionStore,
     on_permission: PermissionCallback | None,
     system_prompt: str,
     add_dirs: list[str],
@@ -33,6 +35,7 @@ def create_agent_backend(
 ) -> AgentBackend:
     if cfg.agent_provider == "claude":
         return ClaudeAgentBackend(
+            session_store=session_store,
             on_permission=on_permission,
             system_prompt=system_prompt,
             cwd=cfg.working_dir,
@@ -43,6 +46,7 @@ def create_agent_backend(
         )
     if cfg.agent_provider == "codex":
         return CodexAgentBackend(
+            session_store=session_store,
             system_prompt=system_prompt,
             cwd=cfg.working_dir,
             idle_ttl_sec=cfg.session_idle_ttl_sec,
@@ -55,6 +59,7 @@ def create_agent_backend(
         )
     if cfg.agent_provider == "pi":
         return PiAgentBackend(
+            session_store=session_store,
             system_prompt=system_prompt,
             cwd=cfg.working_dir,
             idle_ttl_sec=cfg.session_idle_ttl_sec,

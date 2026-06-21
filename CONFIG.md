@@ -197,7 +197,8 @@ Each section: type, default, semantics, valid values, related fields.
 - **Validation:** `~/...` is expanded. The directory must exist (a missing
   path raises a startup error: `[<name>] working_dir does not exist or is
   not a directory: <path>`).
-- **Resolution:** stored as an absolute path (`Path.resolve()`).
+- **Resolution:** stored as an absolute path. Relative paths anchor to the
+  config file's directory (see [Path resolution](#path-resolution)).
 
 ### `logs_dir`
 
@@ -213,6 +214,16 @@ Each section: type, default, semantics, valid values, related fields.
 - **Console:** general events also reach the shared console handler — the
   file is additive.
 - **See also:** `chat_logger_capacity` (cap on cached per-chat loggers).
+
+### `sessions_dir`
+
+- **Type:** `str | null`.
+- **Default:** `null` → `var/sessions` at the repo root.
+- **Semantics:** base directory for per-chat session metadata. Each bot
+  gets `<sessions_dir>/<internal_name>/<chat_id>.json` (the meta layer over
+  the SDK's own history — see [src/infra/session_store.py](src/infra/session_store.py)).
+- **Validation:** `~/...` expanded; directory created automatically
+  (`mkdir(parents=True, exist_ok=True)`).
 
 ### `draft_interval_sec`
 
@@ -425,13 +436,28 @@ The loader enforces, at startup:
 - Token presence and non-placeholder.
 - `working_dir` exists and is a directory.
 - `commands_dir` exists and is a directory.
-- `logs_dir` / `uploads_dir` are created if absent.
+- `logs_dir` / `sessions_dir` / `uploads_dir` are created if absent.
 - `allowed_chat_ids` / `blacklist_chat_ids` are arrays of integers.
 - `allowed_for_all` is a boolean.
 - `lang` is lowercased.
 
 Anything failing raises a clear `ValueError` containing the bot name —
 fail-fast on misconfiguration.
+
+### Path resolution
+
+Every path field (`working_dir`, `logs_dir`, `sessions_dir`, `uploads_dir`,
+`commands_dir`) is normalized the same way:
+
+1. `~` is expanded to the home directory.
+2. A **relative** path anchors to the **config file's directory**
+   (`src/config/`), not the process CWD — so paths behave the same no
+   matter where you launch the bot from.
+3. The result is resolved to an absolute path and stored.
+
+Example: with the config at `src/config/config.yaml`, `logs_dir:
+../../var/log/brain` resolves to `<repo>/var/log/brain`. Absolute paths
+pass through untouched.
 
 ---
 
