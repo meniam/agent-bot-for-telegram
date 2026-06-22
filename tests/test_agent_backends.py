@@ -712,3 +712,51 @@ async def _record(
     payload: dict[str, Any],
 ) -> None:
     events.append((chat_id, phase, tool_name, payload))
+
+
+async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    import src.infra.claude_agent as claude_module
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_query(*, prompt: str, options: Any) -> Any:
+        captured["prompt"] = prompt
+        captured["options"] = options
+        yield AssistantMessage(content=[TextBlock(text="done")], model="m")
+
+    monkeypatch.setattr(claude_module, "query", _fake_query)
+
+    store = _store()
+    store.create(123)  # establish a current session
+    before = store.current_id(123)
+
+    backend = ClaudeAgentBackend(store, system_prompt="x")
+    out = await backend.ask_ephemeral(123, "hi", allowed_tools=("Read",))
+
+    assert out == "done"
+    # The chat's live session / current pointer must be unchanged.
+    assert store.current_id(123) == before
+    assert backend.has_session(123) is False  # no live client spun up
+
+    # Permission callback allows listed tools, denies everything else.
+    can_use = captured["options"].can_use_tool
+    allow = await can_use("Read", {}, None)
+    deny = await can_use("Bash", {}, None)
+    assert type(allow).__name__ == "PermissionResultAllow"
+    assert type(deny).__name__ == "PermissionResultDeny"
+
+
+async def test_ask_ephemeral_not_supported_on_codex() -> None:
+    backend = create_agent_backend(
+        _cfg(agent_provider="codex"),
+        session_store=_store(),
+        on_permission=None,
+        system_prompt="x",
+        add_dirs=[],
+        on_tool_event=None,
+        codex_factory=lambda: _FakeCodex(),
+    )
+    with pytest.raises(NotImplementedError):
+        await backend.ask_ephemeral(1, "x", allowed_tools=())

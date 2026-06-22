@@ -293,8 +293,33 @@ def _render_footnotes(footnotes: list[SyntaxTreeNode]) -> str:
     return "<footer>" + "<br>".join(lines) + "</footer>\n\n"
 
 
+# A line-leading `>` followed immediately by a digit or `=` (after optional
+# indent and an optional list bullet) is a comparison like `>8`, `>100K`, `>=`,
+# never a blockquote — but CommonMark makes the space after `>` optional, so the
+# parser would quote it. Escape the marker so it renders literally. Real
+# blockquotes (`> text`) and nested ones (`>>`) are untouched.
+_FAUX_QUOTE_RE = re.compile(
+    r"^(\s*(?:[-*+]\s+|\d+[.)]\s+)?)>(?=[0-9=])", re.MULTILINE
+)
+# Fenced code blocks must be left verbatim — a backslash escape would print
+# literally inside them.
+_FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:\n[ \t]*\1[ \t]*$|\Z)",
+                       re.MULTILINE | re.DOTALL)
+
+
+def _escape_faux_quotes(text: str) -> str:
+    out: list[str] = []
+    pos = 0
+    for m in _FENCE_RE.finditer(text):
+        out.append(_FAUX_QUOTE_RE.sub(r"\1\\>", text[pos : m.start()]))
+        out.append(m.group(0))  # fenced code: verbatim
+        pos = m.end()
+    out.append(_FAUX_QUOTE_RE.sub(r"\1\\>", text[pos:]))
+    return "".join(out)
+
+
 def to_html(text: str) -> str:
-    tokens = _md.parse(text)
+    tokens = _md.parse(_escape_faux_quotes(text))
     tree = SyntaxTreeNode(tokens)
     return _render(tree)
 
@@ -303,24 +328,58 @@ def to_html(text: str) -> str:
 # `<pre>` keeps newlines significant; `<table>` rows/cells own their layout.
 _PRE_OR_TABLE_RE = re.compile(r"<pre>.*?</pre>|<table>.*?</table>", re.DOTALL)
 
+# Block-level tags own their vertical spacing when rendered as real HTML, so the
+# structural newlines `_render` emits around them must be dropped — turning them
+# into `<br>` would double every gap. Only newlines between inline content
+# (paragraph soft/hard breaks) survive as `<br>`.
+_BLOCK_TAGS = (
+    "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "li", "blockquote",
+    "aside", "pre", "table", "tr", "th", "td", "thead", "tbody", "caption",
+    "hr", "footer", "figure", "figcaption", "details", "summary",
+    "tg-math-block",
+)
+_BLOCK_TAG_ALT = "|".join(sorted(_BLOCK_TAGS, key=len, reverse=True))
+# A newline that directly follows a block tag's `>` or directly precedes a block
+# tag's `<` is structural; collapse it (and any run) away before `<br>` mapping.
+_STRUCT_NL_RE = re.compile(
+    rf"(</?(?:{_BLOCK_TAG_ALT})\b[^>]*/?>)\n+"
+    rf"|\n+(?=</?(?:{_BLOCK_TAG_ALT})\b[^>]*/?>)"
+)
+
+
+def _breaks(seg: str) -> str:
+    """Drop structural newlines around block tags; map the rest to `<br>`."""
+    seg = _STRUCT_NL_RE.sub(lambda m: m.group(1) or "", seg)
+    return seg.replace("\n", "<br>")
+
 
 def to_rich_html(text: str) -> str:
     """`to_html` adapted for sendRichMessage: line breaks become `<br>`.
 
     Unlike classic `parse_mode=HTML` (where `\\n` is a newline), Rich Message
-    HTML is rendered as a document — bare newlines turn into spaces. Convert
-    them to `<br>`, except inside `<pre>` (newlines are meaningful) and
-    `<table>` (drop the structural newlines between rows/cells).
+    HTML is rendered as a document — bare newlines turn into spaces. Soft/hard
+    line breaks inside paragraphs become `<br>`, but the structural newlines
+    `_render` emits around block tags are dropped (the tags space themselves;
+    keeping them would double every gap). `<pre>` keeps newlines significant;
+    `<table>` drops the structural newlines between rows/cells.
     """
     converted = to_html(text)
     out: list[str] = []
     pos = 0
     for m in _PRE_OR_TABLE_RE.finditer(converted):
-        out.append(converted[pos : m.start()].replace("\n", "<br>"))
+        # `<pre>`/`<table>` are block-level: newlines butting against the seam
+        # are structural (the block spaces itself). `_breaks` can't see across
+        # the protected segment, so trim them here. `lstrip` only past the first
+        # block, where the left side actually touches a preceding block.
+        before = converted[pos : m.start()].rstrip("\n")
+        if pos:
+            before = before.lstrip("\n")
+        out.append(_breaks(before))
         seg = m.group(0)
         out.append(seg.replace("\n", "") if seg.startswith("<table>") else seg)
         pos = m.end()
-    out.append(converted[pos:].replace("\n", "<br>"))
+    tail = converted[pos:]
+    out.append(_breaks(tail.lstrip("\n") if pos else tail))
     return "".join(out)
 
 

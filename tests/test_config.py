@@ -291,3 +291,54 @@ def test_extra_fields_rejected() -> None:
         BotConfig.model_validate(
             {"name": "x", "telegram_bot_token": "1:abc", "garbage": True}
         )
+
+
+def test_tasks_section_loads(tmp_path: Path) -> None:
+    p = _write_yaml(
+        tmp_path,
+        """
+        alpha:
+          gateway:
+            telegram_bot_token: "1:abc"
+            access:
+              admin_chat_ids: [111, 222]
+          tasks:
+            enabled: true
+            dir: ./var/alpha/tasks
+            scripts_dir: ./var/alpha/scripts
+            tick_interval_sec: 30
+            max_output_chars: 1000
+            script_timeout_sec: 120
+            history_limit: 50
+            allowed_tools: [Read, Grep]
+        """,
+    )
+    bots = load(p)
+    cfg = bots["alpha"]
+    assert cfg.tasks_enabled is True
+    assert cfg.tasks_dir is not None and Path(cfg.tasks_dir).is_absolute()
+    assert Path(cfg.tasks_dir).is_dir()
+    assert cfg.tasks_scripts_dir is not None and Path(cfg.tasks_scripts_dir).is_dir()
+    assert cfg.tasks_tick_interval_sec == 30
+    assert cfg.tasks_history_limit == 50
+    assert cfg.tasks_allowed_tools == ("Read", "Grep")
+    assert cfg.admin_chat_ids == (111, 222)
+
+
+def test_tasks_absent_defaults_disabled(tmp_path: Path) -> None:
+    p = _write(tmp_path, {"alpha": {"telegram_bot_token": "1:abc"}})
+    cfg = load(p)["alpha"]
+    assert cfg.tasks_enabled is False
+    assert cfg.tasks_dir is None
+    assert cfg.tasks_allowed_tools is None  # read-only default resolved at runtime
+    assert cfg.admin_chat_ids == ()
+
+
+def test_is_admin_fail_closed() -> None:
+    cfg = BotConfig.model_validate(
+        {"name": "x", "telegram_bot_token": "1:abc", "admin_chat_ids": [7]}
+    )
+    assert config_module.is_admin(cfg, 7) is True
+    assert config_module.is_admin(cfg, 8) is False
+    empty = BotConfig.model_validate({"name": "y", "telegram_bot_token": "1:abc"})
+    assert config_module.is_admin(empty, 7) is False

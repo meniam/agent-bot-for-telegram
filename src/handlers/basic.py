@@ -19,13 +19,15 @@ from .context import BotContext
 
 # Commands worth including a usage example next to in `/help`.
 _HELP_EXAMPLES = frozenset(
-    ("plan", "mode", "model", "stop", "context", "mcp", "info")
+    ("plan", "mode", "model", "stop", "context", "mcp", "info", "task", "tasks")
 )
 
 # `/help` layout: ordered groups of built-in commands. Anything not listed
 # here (i.e. user-defined custom commands) is rendered under a final group.
+# `task` only appears when the tasks feature is enabled (it is absent from the
+# command list otherwise), so listing it here is harmless when disabled.
 _HELP_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("help_group_sessions", ("new", "sess")),
+    ("help_group_sessions", ("new", "sess", "tasks", "task")),
     ("help_group_agent", ("plan", "mode", "model", "stop", "context", "cancel")),
     ("help_group_info", ("start", "mcp", "info", "whoami", "help")),
 )

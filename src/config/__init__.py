@@ -24,6 +24,17 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
         "allowed_for_all": "allowed_for_all",
         "allowed_chat_ids": "allowed_chat_ids",
         "blacklist_chat_ids": "blacklist_chat_ids",
+        "admin_chat_ids": "admin_chat_ids",
+    },
+    "tasks": {
+        "enabled": "tasks_enabled",
+        "dir": "tasks_dir",
+        "scripts_dir": "tasks_scripts_dir",
+        "tick_interval_sec": "tasks_tick_interval_sec",
+        "max_output_chars": "tasks_max_output_chars",
+        "script_timeout_sec": "tasks_script_timeout_sec",
+        "history_limit": "tasks_history_limit",
+        "allowed_tools": "tasks_allowed_tools",
     },
     "agent": {
         "provider": "agent_provider",
@@ -94,6 +105,7 @@ GATEWAY_ACCESS_FIELDS: dict[str, str] = {
     "allowed_for_all": "allowed_for_all",
     "allowed_chat_ids": "allowed_chat_ids",
     "blacklist_chat_ids": "blacklist_chat_ids",
+    "admin_chat_ids": "admin_chat_ids",
 }
 
 AGENT_CONFIG_FIELDS: dict[str, str] = {
@@ -170,11 +182,36 @@ class BotConfig(BaseModel):
     allowed_for_all: bool = False
     allowed_chat_ids: tuple[int, ...] = ()
     blacklist_chat_ids: tuple[int, ...] = ()
+    # Chats allowed to manage global tasks and create script tasks. Fail-closed:
+    # empty means no admins. Subset semantics are enforced by handlers, not ACL.
+    admin_chat_ids: tuple[int, ...] = ()
+    # Scheduled tasks. `tasks_enabled=False` (default) keeps the scheduler off
+    # and makes /task reply "disabled".
+    tasks_enabled: bool = False
+    # Per-bot directory for task definitions + run history. None disables.
+    tasks_dir: str | None = None
+    # Directory holding runnable *.sh/*.py task scripts. None disables scripts.
+    tasks_scripts_dir: str | None = None
+    tasks_tick_interval_sec: int = 60
+    tasks_max_output_chars: int = 4000
+    tasks_script_timeout_sec: int = 300
+    tasks_history_limit: int = 100
+    # Tools an LLM task may use without interactive approval. None → read-only
+    # default (Read/Glob/Grep/WebFetch); empty tuple → no tools at all.
+    tasks_allowed_tools: tuple[str, ...] | None = None
 
     @field_validator("lang", mode="before")
     @classmethod
     def _lang_lower(cls, v: object) -> object:
         return str(v).lower() if v is not None else v
+
+
+def is_admin(cfg: BotConfig, chat_id: int) -> bool:
+    """Whether ``chat_id`` may manage global tasks and create script tasks.
+
+    Fail-closed: an empty ``admin_chat_ids`` means there are no admins.
+    """
+    return chat_id in cfg.admin_chat_ids
 
 
 def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -324,6 +361,28 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
             )
         commands_dir = str(cd)
 
+    tasks_dir = data.get("tasks_dir")
+    if tasks_dir:
+        td = _resolve_path(tasks_dir, base_dir)
+        td.mkdir(parents=True, exist_ok=True)
+        tasks_dir = str(td)
+
+    tasks_scripts_dir = data.get("tasks_scripts_dir")
+    if tasks_scripts_dir:
+        tsd = _resolve_path(tasks_scripts_dir, base_dir)
+        tsd.mkdir(parents=True, exist_ok=True)
+        tasks_scripts_dir = str(tsd)
+
+    raw_allowed_tools = data.get("tasks_allowed_tools")
+    if raw_allowed_tools is None:
+        tasks_allowed_tools: tuple[str, ...] | None = None
+    elif isinstance(raw_allowed_tools, list):
+        tasks_allowed_tools = tuple(str(x) for x in raw_allowed_tools)
+    else:
+        raise ValueError(
+            f"[{name}] tasks.allowed_tools must be null or a list of tool names"
+        )
+
     def _parse_chat_id_list(field: str) -> tuple[int, ...]:
         raw = data.get(field)
         if raw is None:
@@ -341,6 +400,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
 
     allowed_chat_ids = _parse_chat_id_list("allowed_chat_ids")
     blacklist_chat_ids = _parse_chat_id_list("blacklist_chat_ids")
+    admin_chat_ids = _parse_chat_id_list("admin_chat_ids")
 
     raw_for_all = data.get("allowed_for_all", False)
     if not isinstance(raw_for_all, bool):
@@ -366,7 +426,11 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "commands_dir": commands_dir,
         "allowed_chat_ids": allowed_chat_ids,
         "blacklist_chat_ids": blacklist_chat_ids,
+        "admin_chat_ids": admin_chat_ids,
         "allowed_for_all": raw_for_all,
+        "tasks_dir": tasks_dir,
+        "tasks_scripts_dir": tasks_scripts_dir,
+        "tasks_allowed_tools": tasks_allowed_tools,
     }
     if raw_groq:
         payload["groq_api_key"] = raw_groq
@@ -381,6 +445,11 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "groq_timeout_sec",
         "voice_max_duration_sec",
         "upload_max_bytes",
+        "tasks_enabled",
+        "tasks_tick_interval_sec",
+        "tasks_max_output_chars",
+        "tasks_script_timeout_sec",
+        "tasks_history_limit",
     ):
         if key in data:
             payload[key] = data[key]

@@ -34,3 +34,36 @@ def test_available_languages_lists_json_stems() -> None:
     langs = available_languages()
     assert DEFAULT_LANG in langs
     assert "en" in langs
+
+
+def test_task_keys_present_in_all_locales() -> None:
+    import json
+    from pathlib import Path
+
+    keys = [
+        "task_disabled",
+        "task_usage",
+        "task_created",
+        "task_global_created",
+        "task_add_error",
+        "task_admin_only",
+        "task_list_empty",
+        "task_list_header",
+        "task_not_found",
+        "task_paused",
+        "task_resumed",
+        "task_removed",
+        "task_triggered",
+    ]
+    i18n_dir = Path(__file__).resolve().parent.parent / "src" / "i18n"
+    for path in i18n_dir.glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for key in keys:
+            assert key in data, f"{path.name} missing {key}"
+
+
+def test_task_message_formatting() -> None:
+    tr = Translator(DEFAULT_LANG)
+    assert "abc" in tr.t("task_created", id="abc", schedule="every 30m")
+    assert "boom" in tr.t("task_add_error", error="boom")
+    assert "xyz" in tr.t("task_not_found", id="xyz")

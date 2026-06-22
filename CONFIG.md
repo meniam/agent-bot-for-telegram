@@ -404,6 +404,62 @@ Each section: type, default, semantics, valid values, related fields.
   without flipping the whole config.
 - **Validation:** same as `allowed_chat_ids`.
 
+### `admin_chat_ids`
+
+- **Section:** `gateway.access`.
+- **Type:** `tuple[int, ...]`.
+- **Default:** `()` — empty (fail-closed: no admins).
+- **Semantics:** chats allowed to create **global** tasks (`/task add
+  --global`) and **script** tasks (`/task add ... --script`). Everyone else
+  can only create their own LLM `scope=user` tasks.
+- **Validation:** same as `allowed_chat_ids`.
+
+---
+
+## Scheduled tasks (`tasks` section)
+
+Optional per-bot feature. Omit the section (or set `enabled: false`) to keep the
+scheduler off; `/task` then replies with `task_disabled`. See
+[COMMANDS.md](COMMANDS.md) for the `/task` command.
+
+```yaml
+brain:
+  tasks:
+    enabled: true
+    dir: ../../var/brain/tasks
+    scripts_dir: ../../var/brain/scripts
+    tick_interval_sec: 60
+    max_output_chars: 4000
+    script_timeout_sec: 300
+    history_limit: 100
+    allowed_tools: [Read, Glob, Grep, WebFetch]
+```
+
+- `enabled` — master switch. Default `false`.
+- `dir` — per-bot directory for task JSON + run history. Resolved relative to
+  the config file (like `sessions_dir`); written **as-is**, no `<bot_name>`
+  suffix. Holds `<chat_id>.json`, `global.json`, `history/<task_id>/<ts>.json`,
+  `_corrupt/`.
+- `scripts_dir` — directory of runnable `*.sh` / `*.py` task scripts. Script
+  paths are contained here (no traversal). Required for script tasks.
+- `tick_interval_sec` — how often the scheduler checks for due tasks. Default
+  `60`.
+- `max_output_chars` — output truncation for delivery and history. Default
+  `4000`.
+- `script_timeout_sec` — hard timeout for one script run. Default `300`.
+- `history_limit` — max run-history records kept per task; oldest pruned.
+  Default `100`.
+- `allowed_tools` — tools an LLM task may use **without interactive approval**
+  (nobody is watching a background run). Omit for the read-only default
+  `[Read, Glob, Grep, WebFetch]`; `[]` disables all tools (reasoning + text
+  only). Anything not listed is denied silently.
+
+Restart behaviour: a task carries a single `next_run_at` (no missed-run
+backlog). After downtime a one-shot past its 120s grace is marked `completed`
+without running; a recurring run later than its grace window (period/2, clamped
+to 2 min – 2 h) is fast-forwarded instead of fired. Worst case is one catch-up
+run per task, never a flood.
+
 ---
 
 ## 4. Access control matrix

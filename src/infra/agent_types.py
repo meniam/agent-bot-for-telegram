@@ -45,6 +45,18 @@ class AgentBackend(Protocol):
 
     def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]: ...
 
+    async def ask_ephemeral(
+        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+    ) -> str:
+        """One-shot turn in a throwaway session (for scheduled LLM tasks).
+
+        Must not mutate the chat's live session or ``current`` pointer.
+        Permissions are non-interactive: only ``allowed_tools`` are permitted.
+        Backends without a stateless turn primitive may raise
+        ``NotImplementedError``.
+        """
+        ...
+
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]: ...
 
     async def set_permission_mode(self, chat_id: int, mode: str) -> None: ...

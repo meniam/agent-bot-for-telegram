@@ -680,6 +680,12 @@ class CodexAgentBackend:
         title = " ".join(text.split())[:_TITLE_MAX_LEN].strip()
         return title or None
 
+    async def ask_ephemeral(
+        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+    ) -> str:
+        _ = (chat_id, prompt, allowed_tools)
+        raise NotImplementedError("Codex backend has no ephemeral-session turn")
+
     async def reset(self, chat_id: int) -> None:
         lock = self._locks.get(chat_id)
         if chat_id in self._active_turns or (lock is not None and lock.locked()):
