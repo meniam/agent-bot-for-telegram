@@ -5,8 +5,10 @@ Each file is downloaded into the configured uploads_dir, queued on the
 debounced for an album).
 """
 
+import asyncio
 import contextlib
 import logging
+from typing import BinaryIO, cast
 
 from aiogram import Dispatcher, F
 from aiogram.types import Message
@@ -47,10 +49,17 @@ async def _save_upload(
             ),
         )
         return None
-    path = ctx.uploads.build_path(message.chat.id, file_id, original_name)
+    # build_path creates the per-chat dir (mkdir) — keep that off the event loop.
+    path = await asyncio.to_thread(
+        ctx.uploads.build_path, message.chat.id, file_id, original_name
+    )
     try:
-        with path.open("wb") as f:
+        # Open/close off the event loop; the download itself streams async.
+        f = cast("BinaryIO", await asyncio.to_thread(path.open, "wb"))
+        try:
             await ctx.bot.download(file_id, destination=f)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         ctx.glog.exception("[%s] upload download failed", ctx.cfg.name)
         cl.exception("upload download failed: %s", e)

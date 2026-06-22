@@ -9,6 +9,7 @@ import pytest
 from src.infra.message_db import (
     MESSAGES_MAX_LIMIT,
     SqliteChatLogHandler,
+    connect,
     query_messages,
     search_messages,
 )
@@ -529,3 +530,14 @@ def test_search_trigger_reflects_update(tmp_path: Path) -> None:
     assert [r["message"] for r in search_messages(db, "возврат")] == [
         "новый текст возврата"
     ]  # new term indexed by messages_au trigger
+
+
+def test_connect_applies_pragma_tuning(tmp_path: Path) -> None:
+    """Verify connect() sets WAL, synchronous=NORMAL, and busy_timeout."""
+    conn = connect(tmp_path / "p.db")
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    finally:
+        conn.close()

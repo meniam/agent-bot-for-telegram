@@ -129,6 +129,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+    # NORMAL is durable under WAL (only loses the last txn on power loss, never
+    # corrupts) and far cheaper than FULL; busy_timeout lets a writer wait out a
+    # concurrent writer instead of failing fast with SQLITE_BUSY.
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(SCHEMA)
     conn.commit()
     _ensure_fts(conn)

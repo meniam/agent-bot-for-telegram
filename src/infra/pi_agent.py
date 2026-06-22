@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .agent_base import BaseAgentBackend
 from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
@@ -33,6 +33,13 @@ PI_MODES: tuple[str, ...] = ("default", "read_only", "no_tools", "plan")
 PI_MODELS: tuple[tuple[str, str], ...] = (("", ""),)
 _READ_ONLY_TOOLS = ("read", "grep", "find", "ls")
 PI_EVENT_TIMEOUT_SEC = 120.0
+
+# Raise the StreamReader line cap (default 64 KiB) so a large JSONL response does
+# not abort the reader; bound the unsolicited-event queue so a chatty CLI cannot
+# grow memory without limit; keep only the tail of stderr for diagnostics.
+_STDOUT_LINE_LIMIT = 4 * 1024 * 1024
+_EVENT_QUEUE_MAX = 1000
+_STDERR_TAIL_MAX = 64 * 1024
 
 
 class PiRpcTransport(Protocol):
@@ -69,8 +76,9 @@ class PiRpcProcess:
         self._persist_session = persist_session
         self._proc: asyncio.subprocess.Process | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
-        self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=_EVENT_QUEUE_MAX)
         self._reader_task: asyncio.Task[None] | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
         self._write_lock = asyncio.Lock()
         self._closed = False
 
@@ -88,8 +96,10 @@ class PiRpcProcess:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self._cwd,
+            limit=_STDOUT_LINE_LIMIT,
         )
         self._reader_task = asyncio.create_task(self._read_stdout())
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
 
     async def request(self, command: dict[str, Any]) -> dict[str, Any]:
         """Send a command (assigning an id) and await its response."""
@@ -119,6 +129,11 @@ class PiRpcProcess:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._reader_task
             self._reader_task = None
+        if self._stderr_task is not None and not self._stderr_task.done():
+            self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._stderr_task
+            self._stderr_task = None
         proc = self._proc
         self._proc = None
         if proc is not None and proc.returncode is None:
@@ -132,7 +147,7 @@ class PiRpcProcess:
             if not fut.done():
                 fut.set_exception(RuntimeError("PI RPC process closed"))
         self._pending.clear()
-        self._events.put_nowait({"type": "rpc_closed"})
+        self._offer_event({"type": "rpc_closed"})
 
     async def _ensure_started(self) -> None:
         """Start the subprocess if needed and assert it is alive with usable stdin.
@@ -170,7 +185,14 @@ class PiRpcProcess:
             return
         try:
             while True:
-                raw = await self._proc.stdout.readline()
+                try:
+                    raw = await self._proc.stdout.readline()
+                except (asyncio.LimitOverrunError, ValueError) as exc:
+                    # Line exceeded the StreamReader limit; readline has already
+                    # discarded the offending buffer, so log and keep reading
+                    # rather than letting the reader task die silently.
+                    log.warning("PI RPC stdout line over limit, dropped: %s", exc)
+                    continue
                 if not raw:
                     break
                 line = raw.decode("utf-8", errors="replace").removesuffix("\n")
@@ -189,11 +211,47 @@ class PiRpcProcess:
                         fut.set_result(payload)
                         continue
                 if isinstance(payload, dict):
-                    self._events.put_nowait(payload)
+                    self._offer_event(payload)
         finally:
             for fut in self._pending.values():
                 if not fut.done():
                     fut.set_exception(RuntimeError("PI RPC stdout closed"))
+
+    async def _drain_stderr(self) -> None:
+        """Continuously drain the subprocess stderr so its pipe never fills.
+
+        Without this, the OS pipe buffer (~64 KiB) fills when the CLI is chatty
+        on stderr, blocking the child on write and deadlocking the RPC. Output is
+        kept only as a bounded tail and surfaced through the log.
+        """
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        tail = bytearray()
+        try:
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    break
+                tail.extend(chunk)
+                if len(tail) > _STDERR_TAIL_MAX:
+                    del tail[: len(tail) - _STDERR_TAIL_MAX]
+        finally:
+            if tail:
+                log.warning(
+                    "PI RPC stderr: %s", tail.decode("utf-8", errors="replace")
+                )
+
+    def _offer_event(self, event: dict[str, Any]) -> None:
+        """Queue an unsolicited event, dropping the oldest if the queue is full."""
+        try:
+            self._events.put_nowait(event)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._events.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                self._events.put_nowait(event)
+            log.warning("PI RPC event queue full; dropped oldest event")
 
 
 @dataclass(slots=True)
@@ -285,7 +343,7 @@ class PiAgentBackend(BaseAgentBackend):
             session = await self._get_session(chat_id)
             run_prompt = self._prepare_prompt(prompt, session.mode)
             command: dict[str, Any] = {"type": "prompt", "message": run_prompt}
-            images = self._extract_images(prompt)
+            images = await self._extract_images(prompt)
             if images:
                 command["images"] = images
             self._active.add(chat_id)
@@ -486,10 +544,11 @@ class PiAgentBackend(BaseAgentBackend):
             return text
         return None
 
-    def _extract_images(self, prompt: str) -> list[dict[str, str]]:
+    async def _extract_images(self, prompt: str) -> list[dict[str, str]]:
         """Read attached image files and return base64 image parts for the RPC command.
 
-        Skips non-image MIME types and unreadable files.
+        Skips non-image MIME types and unreadable files. File reads run in a
+        worker thread so they never block the event loop.
         """
         images: list[dict[str, str]] = []
         for path in self._attachment_image_paths(prompt):
@@ -497,9 +556,10 @@ class PiAgentBackend(BaseAgentBackend):
             if not mime.startswith("image/"):
                 continue
             try:
-                data = base64.b64encode(path.read_bytes()).decode("ascii")
+                raw = await asyncio.to_thread(path.read_bytes)
             except OSError:
                 continue
+            data = base64.b64encode(raw).decode("ascii")
             images.append({"type": "image", "data": data, "mimeType": mime})
         return images
 
@@ -539,7 +599,9 @@ class PiAgentBackend(BaseAgentBackend):
         """
         if self._transport_factory is not None:
             return self._transport_factory(model)
-        cli_bin = self._cli_bin or shutil.which("pi")
+        cli_bin = self._cli_bin or cast(
+            "str | None", await asyncio.to_thread(shutil.which, "pi")
+        )
         if cli_bin is None:
             raise RuntimeError(
                 "PI backend requires the pi CLI. Install PI.dev CLI or set pi_cli_bin."

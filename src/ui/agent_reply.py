@@ -56,7 +56,7 @@ async def _name_session_in_background(
     ctx: BotContext, chat_id: int, user_text: str, cl: logging.Logger
 ) -> None:
     """If the current session is still unnamed, ask the LLM for a title."""
-    session = ctx.agent.current_session(chat_id)
+    session = await ctx.agent.current_session(chat_id)
     if session is None or session.auto_titled or not user_text.strip():
         return
 
@@ -68,7 +68,7 @@ async def _name_session_in_background(
             cl.warning("session title generation failed: %s", e)
             return
         if title:
-            ctx.sessions.set_title(chat_id, session.id, title)
+            await ctx.sessions.set_title(chat_id, session.id, title)
             cl.info("session %s titled: %s", session.id, title)
 
     task = asyncio.create_task(_run())

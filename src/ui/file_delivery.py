@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import stat as stat_module
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -83,7 +85,7 @@ async def send_file_delivery(
     Paths are confined to `roots`; oversized, missing, non-file, or
     out-of-root entries are skipped with a translated error message.
     """
-    allowed_roots = [root.resolve() for root in roots if root.exists()]
+    allowed_roots = await asyncio.to_thread(_resolve_roots, roots)
     if not allowed_roots:
         await send_md(message, t.t("file_delivery_no_roots"))
         return
@@ -95,13 +97,14 @@ async def send_file_delivery(
         if path is None:
             errors.append(t.t("file_delivery_denied", path=item.path))
             continue
-        if not path.exists():
+        # One stat() off the event loop covers existence, file-ness, and size.
+        exists, is_file, size = await asyncio.to_thread(_probe, path)
+        if not exists:
             errors.append(t.t("file_delivery_missing", path=str(path)))
             continue
-        if not path.is_file():
+        if not is_file:
             errors.append(t.t("file_delivery_not_file", path=str(path)))
             continue
-        size = path.stat().st_size
         if size > MAX_DELIVERY_BYTES:
             errors.append(
                 t.t(
@@ -134,6 +137,24 @@ def _extract_payload(text: str) -> str | None:
     if stripped.startswith("{") and stripped.endswith("}"):
         return stripped
     return None
+
+
+def _resolve_roots(roots: list[Path]) -> list[Path]:
+    """Resolve and keep only existing roots (filesystem I/O; run off the loop)."""
+    resolved: list[Path] = []
+    for root in roots:
+        if root.exists():
+            resolved.append(root.resolve())
+    return resolved
+
+
+def _probe(path: Path) -> tuple[bool, bool, int]:
+    """Single stat() → (exists, is_regular_file, size). Missing/bad → (False, …)."""
+    try:
+        st = path.stat()
+    except (OSError, ValueError):
+        return (False, False, 0)
+    return (True, stat_module.S_ISREG(st.st_mode), st.st_size)
 
 
 def _resolve_requested_path(path_text: str, roots: list[Path]) -> Path | None:

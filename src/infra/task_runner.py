@@ -172,9 +172,15 @@ class TaskRunner:
             stderr=asyncio.subprocess.STDOUT,
             cwd=cwd,
         )
+        # Read with a hard byte cap so a runaway script cannot exhaust memory;
+        # StreamReader.read() applies backpressure, so this never buffers more
+        # than the pipe + cap. Output is char-truncated again below.
+        char_limit = self._cfg.tasks_max_output_chars
+        byte_cap = max((char_limit or 0) * 4, 1 << 20)
         try:
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=self._cfg.tasks_script_timeout_sec
+            stdout, hit_cap = await asyncio.wait_for(
+                self._read_capped(proc.stdout, byte_cap),
+                timeout=self._cfg.tasks_script_timeout_sec,
             )
         except TimeoutError:
             proc.kill()
@@ -182,12 +188,33 @@ class TaskRunner:
             raise ValueError(
                 f"script timed out after {self._cfg.tasks_script_timeout_sec}s"
             ) from None
+        if hit_cap:
+            proc.kill()
+        await proc.wait()
 
         text = stdout.decode("utf-8", errors="replace")
-        limit = self._cfg.tasks_max_output_chars
-        if limit and len(text) > limit:
-            text = text[:limit] + "\n…(truncated)"
+        if char_limit and len(text) > char_limit:
+            text = text[:char_limit] + "\n…(truncated)"
+        elif hit_cap:
+            text = text + "\n…(truncated)"
         return (proc.returncode or 0, text.strip())
+
+    @staticmethod
+    async def _read_capped(
+        stream: asyncio.StreamReader | None, cap: int
+    ) -> tuple[bytes, bool]:
+        """Read up to ``cap`` bytes from ``stream``; return (data, hit_cap)."""
+        if stream is None:
+            return (b"", False)
+        chunks: list[bytes] = []
+        total = 0
+        while total < cap:
+            chunk = await stream.read(min(65536, cap - total))
+            if not chunk:
+                return (b"".join(chunks), False)
+            chunks.append(chunk)
+            total += len(chunk)
+        return (b"".join(chunks), True)
 
     # ----- LLM execution (filled in Phase 4) -------------------------------
 

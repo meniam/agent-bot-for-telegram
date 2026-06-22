@@ -126,7 +126,7 @@ class CodexAgentBackend(BaseAgentBackend):
                     "Install project dependencies and authenticate Codex first."
                 ) from e
             config_cls = getattr(module, "CodexConfig", None)
-            codex_bin = self._resolve_codex_bin()
+            codex_bin = await asyncio.to_thread(self._resolve_codex_bin)
             if config_cls is not None and codex_bin is not None:
                 codex = module.AsyncCodex(
                     config=config_cls(codex_bin=codex_bin, cwd=self._cwd)

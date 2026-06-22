@@ -87,7 +87,9 @@ async def tasks_cmd(
         await send_md(message, ctx.tr.t("task_disabled"))
         return
     tasks = [
-        t for t in ctx.task_service.list(chat_id) if t.state not in _ARCHIVED_STATES
+        t
+        for t in await ctx.task_service.list(chat_id)
+        if t.state not in _ARCHIVED_STATES
     ]
     if not tasks:
         await send_md(message, ctx.tr.t("task_list_empty"))
@@ -208,7 +210,7 @@ async def _add(
 async def _list(ctx: BotContext, message: Message, chat_id: int) -> None:
     """Reply with the caller's visible tasks as a line list."""
     assert ctx.task_service is not None
-    tasks = ctx.task_service.list(chat_id)
+    tasks = await ctx.task_service.list(chat_id)
     if not tasks:
         await send_md(message, ctx.tr.t("task_list_empty"))
         return

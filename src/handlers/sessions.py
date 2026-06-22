@@ -45,18 +45,18 @@ def _short(title: str) -> str:
     return title if len(title) <= _BTN_TITLE_MAX else title[: _BTN_TITLE_MAX - 1] + "…"
 
 
-def _build_view(
+async def _build_view(
     ctx: BotContext, chat_id: int, *, delete_mode: bool, page: int
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Return (header_text, keyboard) for the list at a given mode/page."""
-    sessions = ctx.sessions.list_by_recency(chat_id)
+    sessions = await ctx.sessions.list_by_recency(chat_id)
     if not sessions:
         return ctx.tr.t("sess_list_empty"), None
 
     pages = max(1, (len(sessions) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, pages - 1))
     window = sessions[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
-    current_id = ctx.sessions.current_id(chat_id)
+    current_id = await ctx.sessions.current_id(chat_id)
     marker = ctx.tr.t("sess_current_marker")
 
     rows: list[list[InlineKeyboardButton]] = []
@@ -136,7 +136,7 @@ async def _rerender(
     """Rebuild and edit the session-list message in place for the given page."""
     if not isinstance(callback.message, Message):
         return
-    text, kb = _build_view(ctx, chat_id, delete_mode=delete_mode, page=page)
+    text, kb = await _build_view(ctx, chat_id, delete_mode=delete_mode, page=page)
     with contextlib.suppress(Exception):
         if kb is None:
             await callback.message.edit_text(text)
@@ -158,7 +158,7 @@ async def sessions_cmd(
         # `/sess <n>` — ordinal in created order, for keyboard-less clients.
         await _switch_by_ordinal(ctx, message, chat_id, arg, cl)
         return
-    text, kb = _build_view(ctx, chat_id, delete_mode=False, page=0)
+    text, kb = await _build_view(ctx, chat_id, delete_mode=False, page=0)
     if kb is None:
         await send_md(message, text)
         return
@@ -174,7 +174,7 @@ async def _switch_by_ordinal(
     except ValueError:
         await send_md(message, ctx.tr.t("sess_usage"))
         return
-    target = ctx.sessions.get_by_ordinal(chat_id, ordinal)
+    target = await ctx.sessions.get_by_ordinal(chat_id, ordinal)
     session = await ctx.agent.switch_session(chat_id, target.id) if target else None
     if session is None:
         cl.info("/sess switch failed: ordinal=%s", ordinal)
@@ -231,7 +231,7 @@ async def sessions_ask_delete_callback(
         await callback.answer()
         return
     sid, page = parts[1], (int(parts[2]) if parts[2].isdigit() else 0)
-    target = ctx.sessions.get_by_id(chat_id, sid)
+    target = await ctx.sessions.get_by_id(chat_id, sid)
     if target is None:
         await callback.answer(ctx.tr.t("sess_not_found", ordinal="?"), show_alert=True)
         return

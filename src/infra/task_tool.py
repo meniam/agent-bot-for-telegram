@@ -108,7 +108,7 @@ def make_task_handler(
                     {"task": _fmt_task(created), "message": f"Task {created.id} scheduled."}
                 )
             if action == "list":
-                tasks = service.list(chat_id)
+                tasks = await service.list(chat_id)
                 return _ok({"tasks": [_fmt_task(t) for t in tasks]})
             if action in ("show", "pause", "resume", "run", "rm"):
                 task_id = str(args.get("task_id") or "").strip()

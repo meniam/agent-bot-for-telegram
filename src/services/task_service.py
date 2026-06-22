@@ -129,14 +129,16 @@ class TaskService:
         )
         return await self._store.add(task)
 
-    def list(self, chat_id: int) -> list[Task]:
+    async def list(self, chat_id: int) -> list[Task]:
         """Return the caller's tasks, plus global ones when the caller is admin."""
-        return self._store.list_all(chat_id, include_global=self.is_admin(chat_id))
+        return await self._store.list_all(
+            chat_id, include_global=self.is_admin(chat_id)
+        )
 
-    def get(self, chat_id: int, task_id: str) -> Task:
+    async def get(self, chat_id: int, task_id: str) -> Task:
         """Fetch a visible task or raise `TaskNotFoundError`."""
         admin = self.is_admin(chat_id)
-        task = self._store.get(task_id.strip()) if task_id.strip() else None
+        task = await self._store.get(task_id.strip()) if task_id.strip() else None
         if task is None or not self._visible(task, chat_id, admin=admin):
             raise TaskNotFoundError(task_id or "?")
         return task
@@ -145,7 +147,7 @@ class TaskService:
         """Apply a state action (show/pause/resume/run/rm) to a visible task."""
         if action not in ("show", "pause", "resume", "run", "rm"):
             raise TaskValidationError(f"unknown action: {action}")
-        task = self.get(chat_id, task_id)
+        task = await self.get(chat_id, task_id)
         if action == "show":
             return task
         if action == "rm":

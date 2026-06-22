@@ -101,8 +101,11 @@ def _once_task(chat_id: int = 10) -> Task:
 async def _drain(sched: TaskScheduler) -> None:
     """Run one tick and let the fire-and-forget run-tracked tasks finish."""
     await sched.tick()
-    # Yield enough for the spawned tasks to complete.
-    for _ in range(5):
+    # Await the spawned run-tracked tasks directly: they now hop through
+    # asyncio.to_thread for store I/O, so a fixed number of sleep(0) yields is
+    # no longer enough to guarantee completion.
+    while sched._inflight:
+        await asyncio.gather(*list(sched._inflight), return_exceptions=True)
         await asyncio.sleep(0)
 
 
@@ -116,7 +119,7 @@ async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == [t.id]
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
     assert stored.enabled is False
@@ -132,7 +135,7 @@ async def test_interval_task_reschedules(tmp_path: Path) -> None:
 
     await _drain(sched)
 
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "scheduled"
     assert stored.repeat.completed == 1
@@ -149,7 +152,7 @@ async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == []  # never executed
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.enabled is False
     assert stored.state == "paused"
@@ -181,7 +184,7 @@ async def test_repeat_limit_completes(tmp_path: Path) -> None:
 
     await _drain(sched)
 
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
     assert stored.enabled is False
@@ -205,7 +208,7 @@ async def test_stale_oneshot_completes_without_running(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == []  # never executed
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
 
@@ -247,7 +250,7 @@ async def test_stale_interval_fast_forwards_without_running(tmp_path: Path) -> N
     await _drain(sched)
 
     assert runner.ran == []  # NOT 6 catch-up runs, and not even 1
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.next_run_at is not None
     assert stored.next_run_at > NOW
