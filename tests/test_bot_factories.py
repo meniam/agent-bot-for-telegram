@@ -49,6 +49,39 @@ def test_acl_blacklist_beats_whitelist() -> None:
     assert is_allowed(5) is False
 
 
+def test_acl_empty_whitelist_denies_everyone() -> None:
+    """AGENTS invariant: empty allowed_chat_ids + allowed_for_all=False → nobody."""
+    cfg = _cfg(allowed_chat_ids=())
+    is_allowed = _make_acl(cfg, logging.getLogger("test"))
+    assert is_allowed(0) is False
+    assert is_allowed(1) is False
+    assert is_allowed(-100) is False
+
+
+def test_acl_whitelist_ignored_when_open_to_everyone() -> None:
+    """allowed_for_all bypasses the whitelist entirely; only blacklist still bites."""
+    cfg = _cfg(allowed_for_all=True, allowed_chat_ids=(1,), blacklist_chat_ids=(2,))
+    is_allowed = _make_acl(cfg, logging.getLogger("test"))
+    assert is_allowed(1) is True
+    assert is_allowed(999) is True  # not in whitelist, still admitted
+    assert is_allowed(2) is False  # blacklist overrides
+
+
+def test_acl_admits_negative_group_chat_id() -> None:
+    """Telegram group/supergroup ids are negative — must whitelist/blacklist cleanly."""
+    cfg = _cfg(allowed_chat_ids=(-1001234567890,))
+    is_allowed = _make_acl(cfg, logging.getLogger("test"))
+    assert is_allowed(-1001234567890) is True
+    assert is_allowed(1001234567890) is False  # sign matters, no abs() confusion
+
+
+def test_acl_blacklist_denies_negative_group_under_open() -> None:
+    cfg = _cfg(allowed_for_all=True, blacklist_chat_ids=(-42,))
+    is_allowed = _make_acl(cfg, logging.getLogger("test"))
+    assert is_allowed(-42) is False
+    assert is_allowed(42) is True
+
+
 def test_command_list_includes_all_builtins() -> None:
     tr = Translator("en")
     out = _build_bot_command_list(tr, [])

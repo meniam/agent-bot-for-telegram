@@ -8,7 +8,7 @@ one; this module lists/switches/deletes them.
 UI:
 - Sessions are shown newest-interaction-first (by ``last_used``), paged 15 at a
   time; the page indicator + ◀/▶ sit at the bottom.
-- The action button ("🗑 Удалить сессию" / "⬅️ Назад") sits at the **top**.
+- The action button (delete-session / back) sits at the **top**.
 - Each session is a full-width button so long titles stay readable.
 - Callbacks carry the session **id**, so they survive reordering/paging.
 

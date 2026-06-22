@@ -223,6 +223,8 @@ def compute_next_run(
         return base + timedelta(seconds=schedule.interval_sec)
 
     if schedule.kind == "cron":
+        if not schedule.expr:
+            return None
         from croniter import croniter
 
         base = _ensure_aware(last_run) if last_run else now

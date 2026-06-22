@@ -13,6 +13,7 @@ from aiogram.types import Message, ReactionTypeEmoji, User
 
 from ..handlers.context import BotContext
 from ..infra.agent_types import AgentEventStreamTimeout, AgentTurnReset
+from ..infra.message_db import ROLE_BOT
 from ..services.upload_store import format_attachment_prompt
 from .file_delivery import parse_file_delivery, send_file_delivery
 from .markdown import send_md
@@ -131,7 +132,11 @@ async def reply_with_agent(
             for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir)
             if path is not None
         ]
-        cl.info("bot file delivery: %d file(s)", len(delivery.files))
+        cl.info(
+            "bot file delivery: %d file(s)",
+            len(delivery.files),
+            extra={"role": ROLE_BOT},
+        )
         await send_file_delivery(
             message,
             delivery,
@@ -142,8 +147,12 @@ async def reply_with_agent(
         return
     questionnaire = parse_questionnaire(final)
     if questionnaire is not None:
-        cl.info("bot questionnaire: %d question(s)", len(questionnaire.questions))
+        cl.info(
+            "bot questionnaire: %d question(s)",
+            len(questionnaire.questions),
+            extra={"role": ROLE_BOT},
+        )
         await render_questionnaire(message, questionnaire, ctx.tr)
         return
-    cl.info("bot: %s", final)
+    cl.info("bot: %s", final, extra={"role": ROLE_BOT})
     await send_md(message, final)

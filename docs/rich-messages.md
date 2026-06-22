@@ -563,7 +563,7 @@ HTML equivalent: `<tg-time unix="1647531900" format="wDT">22:45 tomorrow</tg-tim
 
 ---
 
-## Usage in agent-bot
+## Usage in abt
 
 The project sends rich messages via aiogram (`>=3.29`, Bot API 10.1 support).
 

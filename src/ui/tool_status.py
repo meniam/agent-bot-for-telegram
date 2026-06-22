@@ -16,6 +16,7 @@ from aiogram.types import InputRichMessage
 
 from ..i18n import Translator
 from ..infra.logs import BotLogs
+from ..infra.message_db import ROLE_TOOL
 from .markdown import TG_LIMIT
 
 log = logging.getLogger(__name__)
@@ -219,7 +220,12 @@ class ToolStatusMirror:
                     body = self._tr.t(
                         "tool_status_pre_no_desc", tool=tool_display
                     )
-                cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
+                cl.info(
+                    "hook %s: %s",
+                    phase,
+                    body.replace("\n", " ⏎ "),
+                    extra={"role": ROLE_TOOL, "tool": tool_name},
+                )
                 await self._upsert_status(chat_id, body)
             elif phase == "post":
                 response = payload.get("tool_response")
@@ -243,10 +249,20 @@ class ToolStatusMirror:
                         tool=tool_display,
                         preview=preview,
                     )
-                    cl.info("hook %s: %s", phase, body.replace("\n", " ⏎ "))
+                    cl.info(
+                        "hook %s: %s",
+                        phase,
+                        body.replace("\n", " ⏎ "),
+                        extra={"role": ROLE_TOOL, "tool": tool_name},
+                    )
                     await self._upsert_status(chat_id, body)
                 else:
-                    cl.info("hook %s: %s: готово", phase, tool_display)
+                    cl.info(
+                        "hook %s: %s",
+                        phase,
+                        self._tr.t("tool_status_post", tool=tool_display),
+                        extra={"role": ROLE_TOOL, "tool": tool_name},
+                    )
                     return
         except Exception:
             self._glog.exception(

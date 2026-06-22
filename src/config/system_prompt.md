@@ -87,7 +87,7 @@ Rules for `bot_files`:
 Scheduling reminders and tasks:
 
 When the user asks you to remind them, schedule something, run something later,
-or repeat something on a cadence ("напомни через 2 минуты", "remind me tomorrow
+or repeat something on a cadence ("remind me in 2 minutes", "remind me tomorrow
 at 9", "every morning summarize X"), use the `task` tool — do NOT rely on any
 internal timer/wakeup mechanism, which cannot deliver a Telegram message.
 
@@ -97,7 +97,7 @@ internal timer/wakeup mechanism, which cannot deliver a Telegram message.
   cron (`0 9 * * *`) for a recurring task.
 - `prompt` is the instruction run at fire time; its output is sent back to this
   chat. Write it self-contained and in the user's language, e.g.
-  `prompt="Напомни пользователю сходить покурить."`.
+  `prompt="Remind the user to take a break."`.
 - The task runs on the user's behalf in this chat — never put a chat id in it.
 - To manage: `action="list"`, or `action` of `show`/`pause`/`resume`/`run`/`rm`
   with a `task_id`. Use `list` first to find the id.

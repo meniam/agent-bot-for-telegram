@@ -29,8 +29,13 @@ from .task_tool import TASK_TOOL_NAME
 log = logging.getLogger(__name__)
 
 _TITLE_MAX_LEN = 60
-# Cyrillic prompt text is intentional; silence ambiguous-character lint.
-_TITLE_PROMPT = "Придумай короткий заголовок (3-5 слов) для диалога, начатого этим сообщением пользователя. Ответь только заголовком, без кавычек и пояснений.\n\nСообщение:\n"  # noqa: RUF001
+# The title text must follow the bot's configured language; `{lang}` is the
+# ISO 639-1 code from `cfg.lang`, injected per call in `generate_title`.
+_TITLE_PROMPT = (
+    "Generate a short title (3-5 words) for a conversation started by the user "
+    "message below. Reply with the title only — no quotes, no explanations. "
+    "Write the title in this language (ISO 639-1 code): {lang}.\n\nMessage:\n"
+)
 
 PermissionCallback = Callable[
     [int, str, dict[str, Any], ToolPermissionContext],
@@ -62,10 +67,12 @@ class ClaudeAgentBackend:
         on_tool_event: ToolEventCallback | None = None,
         initial_model: str | None = None,
         task_server_factory: Callable[[int], "McpSdkServerConfig | None"] | None = None,
+        lang: str = "en",
     ) -> None:
         self._store = session_store
         self._on_permission = on_permission
         self._system_prompt = system_prompt
+        self._lang = lang
         self._cwd = cwd
         self._idle_ttl = idle_ttl_sec
         self._add_dirs = list(add_dirs) if add_dirs else []
@@ -229,6 +236,7 @@ class ClaudeAgentBackend:
             cwd=self._cwd,
             add_dirs=list(self._add_dirs),
             setting_sources=["user", "project", "local"],
+            skills="all",
             hooks=cast(Any, hooks),
             session_id=session_id,
             resume=resume,
@@ -409,7 +417,7 @@ class ClaudeAgentBackend:
 
     async def generate_title(self, text: str) -> str | None:
         """One-shot Haiku call to name a session. Returns None on failure."""
-        prompt = _TITLE_PROMPT + text[:2000]
+        prompt = _TITLE_PROMPT.format(lang=self._lang) + text[:2000]
         # Stay on the bot's configured model/provider; never assume a specific
         # model (e.g. Haiku) is available on this account. None → CLI default.
         options = ClaudeAgentOptions(

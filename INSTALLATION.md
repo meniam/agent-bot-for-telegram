@@ -1,4 +1,4 @@
-# Installing agent-bot
+# Installing abt (Agent Bot for Telegram)
 
 Python Telegram bot that talks to Claude, Codex, or PI.dev through agent backends + aiogram.
 
@@ -49,8 +49,8 @@ Keep the Telegram bot token secret — it lives in `src/config/config.yaml`, whi
 ## 3. Clone the project and install dependencies
 
 ```bash
-git clone <repo-url> agent-bot
-cd agent-bot
+git clone <repo-url> abt
+cd abt
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -72,7 +72,7 @@ brain:
     lang: en
     access:
       allowed_chat_ids: []
-    logs_dir: /Users/me/Projects/agent-bot/logs
+    logs_dir: /Users/me/Projects/abt/logs
     draft_interval_sec: 0.2
     approval_timeout_sec: 300
   agent:
@@ -222,7 +222,7 @@ Behaviour without a key: any voice/audio message gets a one-line refusal (`voice
 
 Photos, documents and stickers are saved under `<uploads_dir>/<chat_id>/<timestamp>_<file_id>_<original_name>`. Setup:
 
-1. Add `gateway.uploads.dir: /var/lib/telegram-agent-bot/uploads` (or any writable absolute path) to the config file.
+1. Add `gateway.uploads.dir: /var/lib/abt/uploads` (or any writable absolute path) to the config file.
 2. Make sure the user running the bot can write to that directory and the selected agent backend can read from it (in the simple case both are the same user).
 3. Restart — startup logs print `uploads enabled at <path>` when the feature is active.
 
@@ -361,23 +361,35 @@ Loading:
 ## 11. Directory layout
 
 ```
-agent-bot/
+abt/
 ├── src/
 │   ├── __init__.py
 │   ├── bot.py                  # entry: run_bot + _supervise + main + _make_* factories
 │   ├── config/
-│   │   ├── __init__.py         # BotConfig (pydantic), load()
+│   │   ├── __init__.py         # BotConfig (pydantic), load() — config.yaml → .yml → .json
 │   │   ├── config.yaml         # real config, .gitignore'd
 │   │   ├── config.example.yaml # template
-│   │   └── config.example.json # JSON compatibility template
+│   │   └── system_prompt.md    # base system prompt prepended to per-bot prompt
 │   ├── i18n/
 │   │   ├── __init__.py         # Translator
 │   │   └── <lang>.json         # ar, bn, de, en, es, fr, hi, id, ja, ko, mr, pt, ru, sw, ta, te, tr, ur, vi, zh
-│   ├── infra/                  # state managers
-│   │   ├── agent.py            # AgentSessionManager (per-chat ClaudeSDKClient + idle GC + mode/model mirrors)
+│   ├── infra/                  # state managers + agent backends
+│   │   ├── agent.py            # AgentSessionManager (alias → ClaudeAgentBackend, per-chat sessions + idle GC)
+│   │   ├── agent_factory.py    # build backend from agent_provider (claude / codex / pi)
+│   │   ├── agent_types.py      # AgentBackend protocol + shared types
+│   │   ├── claude_agent.py     # Claude Agent SDK backend
+│   │   ├── codex_agent.py      # Codex SDK backend
+│   │   ├── pi_agent.py         # PI.dev (pi --mode rpc) backend
 │   │   ├── commands.py         # *.md → CommandDef loader
 │   │   ├── logs.py             # BotLogs (bot.log + per-chat files, LRU-bounded)
-│   │   ├── streaming.py        # DraftStreamer (sendMessageDraft animation, token-redacting logs)
+│   │   ├── streaming.py        # DraftStreamer (sendRichMessageDraft animation, token-redacting logs)
+│   │   ├── message_db.py       # per-chat SQLite message log + FTS5 trigram search
+│   │   ├── session_store.py    # named multi-session metadata (per-chat SQLite + legacy JSON migration)
+│   │   ├── task_types.py       # task dataclasses (once / interval / cron, LLM / script / global)
+│   │   ├── task_store.py       # task persistence + run history
+│   │   ├── task_scheduler.py   # background scheduler, fires due tasks, no double-firing
+│   │   ├── task_runner.py      # executes an LLM / shell / Python task turn
+│   │   ├── task_tool.py        # per-chat MCP task tool (agent schedules its own follow-ups)
 │   │   └── interactions/       # TelegramInteractionGate package
 │   │       ├── __init__.py     # re-exports TelegramInteractionGate
 │   │       ├── gate.py         # class + shared helpers + dispatch
@@ -387,13 +399,18 @@ agent-bot/
 │   │       └── push_notification.py   # PushNotification flow
 │   ├── services/
 │   │   ├── transcribe.py       # GroqTranscriber (voice/audio → text; accepts bytes or file-like)
-│   │   └── upload_store.py     # UploadStore + PendingFile + format_attachment_prompt
+│   │   ├── upload_store.py     # UploadStore + PendingFile + format_attachment_prompt
+│   │   └── task_service.py     # wires scheduler + store + runner into the bot lifecycle
 │   ├── ui/                     # bot-side UX helpers (no aiogram handlers)
 │   │   ├── agent_reply.py      # react_to + reply_with_agent
 │   │   ├── album.py            # AlbumDebouncer (media_group_id coalescing)
 │   │   ├── markdown.py         # to_html, send_md, audio_filename, format_quote, TG_LIMIT
+│   │   ├── _inline_marks.py    # inline mark/sub/sup rendering helpers
+│   │   ├── _spoiler.py         # spoiler / details rendering helpers
+│   │   ├── file_delivery.py    # send agent-produced files back to the chat
 │   │   ├── middleware.py       # AclMiddleware + deny_access
 │   │   ├── plan_router.py      # PlanRouter (per-chat /plan arm state + fire helper)
+│   │   ├── questionnaire.py    # AskUserQuestion keyboard rendering + answer collection
 │   │   ├── reactions.py        # ReactionPicker (keyword → emoji)
 │   │   ├── sdk_views.py        # format_context_usage / format_mcp_status / format_server_info
 │   │   └── tool_status.py      # ToolStatusMirror (PreToolUse / PostToolUse hooks)
@@ -401,17 +418,20 @@ agent-bot/
 │       ├── __init__.py         # register_all(dp, custom_commands)
 │       ├── context.py          # BotContext (frozen dataclass holding all wiring)
 │       ├── basic.py            # /start /new /cancel /context /stop /mcp /info /whoami /help
+│       ├── sessions.py         # /sess named multi-session list / switch
+│       ├── tasks.py            # /task /tasks scheduling + listing
 │       ├── custom.py           # user-defined slash commands from commands_dir
 │       ├── plan.py             # /plan + perm/aq/plan callbacks
+│       ├── questionnaire.py    # AskUserQuestion poll callbacks
 │       ├── selectors.py        # /mode /model + their callbacks
 │       ├── text.py             # F.text catch-all
 │       ├── voice.py            # F.voice | F.audio
 │       └── uploads.py          # F.photo, F.document, F.sticker
-├── tests/                      # 76 pytest unit tests (config, commands, i18n, uploads, markdown, reactions, sdk_views, plan_router, streaming, logs, bot factories)
+├── tests/                      # pytest unit suite (config, commands, i18n, uploads, markdown, reactions, sdk_views, plan_router, streaming, logs, bot factories, agent backends, sessions, message log, tasks)
 ├── commands/                   # example .md custom commands (gitignored)
 ├── logs/                       # auto-created when logs_dir is set
 ├── uploads/                    # auto-created when uploads_dir is set
-├── pyproject.toml              # build, deps, ruff/mypy/pytest config; [project.scripts] agent-bot
+├── pyproject.toml              # build, deps, ruff/mypy/pytest config; [project.scripts] abt
 ├── requirements.txt            # legacy mirror of pyproject runtime deps
 ├── AGENTS.md                   # full project guide for LLMs
 ├── CONFIG.md                   # per-field config reference

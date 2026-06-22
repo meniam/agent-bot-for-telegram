@@ -3,7 +3,7 @@
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.config import BotConfig
 from src.infra.task_store import TaskStore
@@ -37,7 +37,7 @@ def _handler(
 
 
 def _payload(result: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(result["content"][0]["text"])
+    return cast(dict[str, Any], json.loads(result["content"][0]["text"]))
 
 
 def test_tool_name_is_mcp_qualified() -> None:

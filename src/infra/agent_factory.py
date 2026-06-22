@@ -46,6 +46,7 @@ def create_agent_backend(
             on_tool_event=on_tool_event,
             initial_model=cfg.agent_model,
             task_server_factory=task_server_factory,
+            lang=cfg.lang,
         )
     if cfg.agent_provider == "codex":
         return CodexAgentBackend(

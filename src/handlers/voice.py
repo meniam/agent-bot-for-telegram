@@ -12,6 +12,7 @@ import aiohttp
 from aiogram import Dispatcher, F
 from aiogram.types import Message
 
+from ..infra.message_db import ROLE_USER
 from ..services.transcribe import TranscriptionError
 from ..ui.agent_reply import react_to, reply_with_agent
 from ..ui.markdown import audio_filename, format_quote, send_md
@@ -36,6 +37,7 @@ async def handle_voice(
         media.file_id,
         getattr(media, "duration", None),
         getattr(media, "mime_type", None),
+        extra={"role": ROLE_USER},
     )
     if ctx.transcriber is None:
         await send_md(message, ctx.tr.t("voice_disabled"))
@@ -87,7 +89,7 @@ async def handle_voice(
         await send_md(message, ctx.tr.t("voice_empty"))
         return
 
-    cl.info("transcript: %s", transcript)
+    cl.info("transcript: %s", transcript, extra={"role": ROLE_USER})
     await send_md(
         message,
         f"{ctx.tr.t('voice_recognized')}:\n{format_quote(transcript)}",

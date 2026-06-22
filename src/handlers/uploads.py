@@ -11,6 +11,7 @@ import logging
 from aiogram import Dispatcher, F
 from aiogram.types import Message
 
+from ..infra.message_db import ROLE_USER
 from ..services.upload_store import PendingFile
 from ..ui.agent_reply import react_to, reply_with_agent
 from ..ui.markdown import send_md
@@ -97,6 +98,7 @@ async def handle_photo(
         photo.height,
         photo.file_size,
         message.media_group_id,
+        extra={"role": ROLE_USER},
     )
     item = await _save_upload(
         ctx,
@@ -131,6 +133,7 @@ async def handle_document(
         doc.mime_type,
         doc.file_size,
         message.media_group_id,
+        extra={"role": ROLE_USER},
     )
     item = await _save_upload(
         ctx,
@@ -172,6 +175,7 @@ async def handle_sticker(
         sticker.emoji,
         kind,
         sticker.file_size,
+        extra={"role": ROLE_USER},
     )
     item = await _save_upload(
         ctx,

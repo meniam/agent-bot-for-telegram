@@ -8,8 +8,8 @@ brain:
     lang: ru
     # Directory for bot.log and per-chat log files.
     logs_dir: ../../var/brain/log
-    # Directory for per-chat session metadata; null uses var/sessions.
-    sessions_dir: ../../var/brain/sessions
+    # Directory for per-chat SQLite message logs; null uses <logs_dir>/messages.
+    messages_dir: ../../var/brain/messages
     # Directory with custom slash-command .md files.
     commands_dir: ../../var/brain/commands
     # Minimum delay between Telegram draft updates while the agent streams.
@@ -44,7 +44,7 @@ brain:
     # Upload handling for photos, documents, and stickers.
     uploads:
       # Directory where incoming files are saved; null disables uploads.
-      dir: /var/lib/telegram-agent-bot/uploads
+      dir: /var/lib/abt/uploads
       # Reject files larger than this many bytes; 0 disables the local check.
       max_bytes: 20971520
 

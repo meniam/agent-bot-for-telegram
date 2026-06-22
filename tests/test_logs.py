@@ -1,9 +1,13 @@
 """BotLogs: per-chat LRU eviction closes file handlers."""
 
 import logging
+import logging.handlers
+import sqlite3
 from pathlib import Path
 
 from src.infra.logs import BotLogs
+from src.infra.message_db import SqliteChatLogHandler
+from src.infra.session_store import Session
 
 
 def test_for_chat_creates_logger_with_file_handler(tmp_path: Path) -> None:
@@ -56,6 +60,166 @@ def _cleanup_loggers(prefix: str) -> None:
     for name in list(logging.Logger.manager.loggerDict):
         if name.startswith(prefix):
             logging.Logger.manager.loggerDict.pop(name, None)
+
+
+def test_messages_dir_creates_db_with_session(tmp_path: Path) -> None:
+    logs = BotLogs(
+        name="mbot",
+        base_dir=tmp_path / "bot",
+        messages_dir=tmp_path / "messages",
+    )
+    logs.set_session_resolver(
+        lambda cid: Session(f"s{cid}", "t", auto_titled=False, created_at=0.0, last_used=0.0)
+    )
+    log = logs.for_chat(42)
+    log.info("hi")
+    db = tmp_path / "messages" / "42.db"
+    assert db.exists()
+    conn = sqlite3.connect(db)
+    try:
+        msg = conn.execute("SELECT role, session_id FROM messages").fetchone()
+        sess = conn.execute("SELECT id FROM sessions").fetchone()
+    finally:
+        conn.close()
+    assert msg == ("system", "s42")
+    assert sess == ("s42",)
+    _cleanup_loggers("bot.mbot")
+
+
+def test_no_messages_dir_writes_no_db(tmp_path: Path) -> None:
+    logs = BotLogs(name="nodb", base_dir=tmp_path / "bot")
+    logs.for_chat(1).info("hi")
+    assert not any(tmp_path.rglob("*.db"))
+    _cleanup_loggers("bot.nodb")
+
+
+def test_lru_eviction_closes_sqlite_connection(tmp_path: Path) -> None:
+    logs = BotLogs(
+        name="evict",
+        base_dir=tmp_path / "bot",
+        capacity=1,
+        messages_dir=tmp_path / "messages",
+    )
+    log1 = logs.for_chat(1)
+    sqlite_handlers = [
+        h for h in log1.handlers if isinstance(h, SqliteChatLogHandler)
+    ]
+    assert sqlite_handlers
+    conn = sqlite_handlers[0]._conn
+    logs.for_chat(2)  # evicts chat 1
+    assert log1.handlers == []
+    # connection closed → using it raises
+    try:
+        conn.execute("SELECT 1")
+        raise AssertionError("connection should be closed")
+    except sqlite3.ProgrammingError:
+        pass
+    _cleanup_loggers("bot.evict")
+
+
+def test_messages_dir_without_resolver_tags_null_session(tmp_path: Path) -> None:
+    logs = BotLogs(
+        name="nores",
+        base_dir=tmp_path / "bot",
+        messages_dir=tmp_path / "messages",
+    )
+    logs.for_chat(5).info("orphan")  # no resolver injected
+    db = tmp_path / "messages" / "5.db"
+    conn = sqlite3.connect(db)
+    try:
+        msg = conn.execute("SELECT session_id FROM messages").fetchone()
+        sessions = conn.execute("SELECT count(*) FROM sessions").fetchone()
+    finally:
+        conn.close()
+    assert msg == (None,)
+    assert sessions == (0,)
+    _cleanup_loggers("bot.nores")
+
+
+def test_resolver_returning_none_writes_null_session(tmp_path: Path) -> None:
+    logs = BotLogs(
+        name="nullres",
+        base_dir=tmp_path / "bot",
+        messages_dir=tmp_path / "messages",
+    )
+    logs.set_session_resolver(lambda _cid: None)  # resolver present but yields nothing
+    logs.for_chat(9).info("hi")
+    conn = sqlite3.connect(tmp_path / "messages" / "9.db")
+    try:
+        assert conn.execute("SELECT session_id FROM messages").fetchone() == (None,)
+        assert conn.execute("SELECT count(*) FROM sessions").fetchone() == (0,)
+    finally:
+        conn.close()
+    _cleanup_loggers("bot.nullres")
+
+
+def test_resolver_receives_per_chat_id(tmp_path: Path) -> None:
+    """Each chat's handler must resolve its own id, not a shared captured one."""
+    logs = BotLogs(
+        name="percid",
+        base_dir=tmp_path / "bot",
+        messages_dir=tmp_path / "messages",
+    )
+    logs.set_session_resolver(
+        lambda cid: Session(f"s{cid}", "t", auto_titled=False, created_at=0.0, last_used=0.0)
+    )
+    logs.for_chat(11).info("a")
+    logs.for_chat(22).info("b")
+    for chat, want in ((11, "s11"), (22, "s22")):
+        conn = sqlite3.connect(tmp_path / "messages" / f"{chat}.db")
+        try:
+            assert conn.execute("SELECT session_id FROM messages").fetchone() == (want,)
+        finally:
+            conn.close()
+    _cleanup_loggers("bot.percid")
+
+
+def test_no_base_dir_skips_db_even_with_messages_dir(tmp_path: Path) -> None:
+    """base_dir=None short-circuits to NOOP — messages_dir alone writes nothing."""
+    logs = BotLogs(name="nobase", base_dir=None, messages_dir=tmp_path / "messages")
+    logs.for_chat(1).info("hi")
+    assert not (tmp_path / "messages").exists()
+    assert not any(tmp_path.rglob("*.db"))
+
+
+def test_eviction_closes_file_handler_too(tmp_path: Path) -> None:
+    logs = BotLogs(name="evictfile", base_dir=tmp_path / "bot", capacity=1)
+    log1 = logs.for_chat(1)
+    file_handlers = [
+        h for h in log1.handlers
+        if isinstance(h, logging.handlers.RotatingFileHandler)
+    ]
+    assert file_handlers
+    fh = file_handlers[0]
+    logs.for_chat(2)  # evicts chat 1
+    assert log1.handlers == []
+    assert fh.stream is None  # closed file handler releases its descriptor
+    _cleanup_loggers("bot.evictfile")
+
+
+def test_evicted_chat_reopens_as_fresh_logger(tmp_path: Path) -> None:
+    logs = BotLogs(
+        name="reopen",
+        base_dir=tmp_path / "bot",
+        capacity=1,
+        messages_dir=tmp_path / "messages",
+    )
+    first = logs.for_chat(1)
+    logs.for_chat(2)  # evicts chat 1
+    reborn = logs.for_chat(1)  # re-create after eviction
+    assert reborn is not first  # brand-new logger object
+    assert reborn.handlers  # freshly wired, not the stripped corpse
+    assert any(isinstance(h, SqliteChatLogHandler) for h in reborn.handlers)
+    _cleanup_loggers("bot.reopen")
+
+
+def test_general_logger_no_base_dir_has_no_file_handler() -> None:
+    logs = BotLogs(name="gennobase", base_dir=None)
+    assert not any(
+        isinstance(h, logging.handlers.RotatingFileHandler)
+        for h in logs.general.handlers
+    )
+    _cleanup_loggers("bot.gennobase")
 
 
 def test_module_cleanup_after_run() -> None:
