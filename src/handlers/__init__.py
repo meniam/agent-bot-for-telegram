@@ -15,6 +15,7 @@ from . import (
     questionnaire,
     selectors,
     sessions,
+    tasks,
     text,
     uploads,
     voice,
@@ -29,6 +30,7 @@ def register_all(
     selectors.register(dp)
     basic.register(dp)
     sessions.register(dp)
+    tasks.register(dp)
     plan.register(dp)
     questionnaire.register(dp)
     # User-defined commands MUST come before F.text so `/<name>` does not

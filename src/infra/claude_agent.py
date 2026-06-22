@@ -12,6 +12,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     HookMatcher,
+    McpSdkServerConfig,
     PermissionResultAllow,
     PermissionResultDeny,
     ProcessError,
@@ -23,6 +24,7 @@ from claude_agent_sdk import (
 
 from .agent_types import StreamChunk, ToolEventCallback
 from .session_store import Session, SessionStore
+from .task_tool import TASK_TOOL_NAME
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ class ClaudeAgentBackend:
         add_dirs: list[str] | None = None,
         on_tool_event: ToolEventCallback | None = None,
         initial_model: str | None = None,
+        task_server_factory: Callable[[int], "McpSdkServerConfig | None"] | None = None,
     ) -> None:
         self._store = session_store
         self._on_permission = on_permission
@@ -68,6 +71,7 @@ class ClaudeAgentBackend:
         self._add_dirs = list(add_dirs) if add_dirs else []
         self._on_tool_event = on_tool_event
         self._initial_model = initial_model
+        self._task_server_factory = task_server_factory
         self._clients: dict[int, tuple[ClaudeSDKClient, float]] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._gc_task: asyncio.Task[None] | None = None
@@ -145,6 +149,10 @@ class ClaudeAgentBackend:
                 tool_input: dict[str, Any],
                 ctx: ToolPermissionContext,
             ) -> PermissionResultAllow | PermissionResultDeny:
+                # The scheduling tool is permission-checked internally
+                # (TaskService) and bound to this chat, so it never prompts.
+                if tool_name == TASK_TOOL_NAME:
+                    return PermissionResultAllow()
                 return await on_perm(chat_id, tool_name, tool_input, ctx)
 
             can_use_tool = _can_use_tool
@@ -205,6 +213,15 @@ class ClaudeAgentBackend:
         def _on_stderr(line: str) -> None:
             log.warning("claude cli stderr (chat_id=%s): %s", chat_id, line.rstrip())
 
+        # Per-chat scheduling tool, bound to this chat_id. Registered as an MCP
+        # server; it stays callable without an allowlist and is auto-approved in
+        # `_can_use_tool`, so it never prompts.
+        mcp_servers: dict[str, McpSdkServerConfig] = {}
+        if self._task_server_factory is not None:
+            server = self._task_server_factory(chat_id)
+            if server is not None:
+                mcp_servers["tasks"] = server
+
         return ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             include_partial_messages=True,
@@ -216,6 +233,7 @@ class ClaudeAgentBackend:
             session_id=session_id,
             resume=resume,
             stderr=_on_stderr,
+            mcp_servers=cast(Any, mcp_servers),
         )
 
     async def _get_client(self, chat_id: int) -> ClaudeSDKClient:
@@ -414,6 +432,56 @@ class ClaudeAgentBackend:
         if not title:
             return None
         return title[:_TITLE_MAX_LEN]
+
+    async def ask_ephemeral(
+        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+    ) -> str:
+        """Run a one-shot agent turn in a throwaway session for a scheduled task.
+
+        Uses the SDK's stateless ``query()`` so the chat's live session and the
+        ``current`` pointer are never touched. Permissions are non-interactive:
+        only tools in ``allowed_tools`` are allowed; everything else is denied
+        silently (no Telegram gate — nobody is watching a background run).
+        """
+        allow = set(allowed_tools)
+
+        async def _can_use_tool(
+            tool_name: str,
+            _tool_input: dict[str, Any],
+            _ctx: ToolPermissionContext,
+        ) -> PermissionResultAllow | PermissionResultDeny:
+            if tool_name in allow:
+                return PermissionResultAllow()
+            return PermissionResultDeny(
+                message=f"tool {tool_name} is not in tasks.allowed_tools"
+            )
+
+        options = ClaudeAgentOptions(
+            system_prompt=self._system_prompt,
+            model=self._initial_model,
+            cwd=self._cwd,
+            add_dirs=list(self._add_dirs),
+            setting_sources=["user", "project", "local"],
+            allowed_tools=list(allowed_tools),
+            can_use_tool=_can_use_tool,
+        )
+        log.debug("ask_ephemeral chat_id=%s tools=%s", chat_id, sorted(allow))
+
+        # A `can_use_tool` callback forces streaming mode: the prompt must be an
+        # AsyncIterable of message dicts, not a plain string.
+        async def _prompt_stream() -> AsyncIterator[dict[str, Any]]:
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": prompt},
+            }
+
+        parts: list[str] = []
+        async for msg in query(prompt=_prompt_stream(), options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        parts.append(block.text)
+        return "".join(parts).strip()
 
     async def reset(self, chat_id: int) -> None:
         async with self._lock(chat_id):

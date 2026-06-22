@@ -35,6 +35,11 @@ from .infra.interactions import TelegramInteractionGate
 from .infra.logs import BotLogs, setup_console
 from .infra.session_store import SessionStore
 from .infra.streaming import DraftStreamer
+from .infra.task_runner import TaskRunner
+from .infra.task_scheduler import TaskScheduler
+from .infra.task_store import TaskStore
+from .infra.task_tool import build_task_server
+from .services.task_service import TaskService
 from .services.transcribe import GroqTranscriber
 from .services.upload_store import UploadStore
 from .ui.album import AlbumDebouncer
@@ -49,12 +54,20 @@ SESSIONS_DIR = Path(__file__).resolve().parent.parent / "var" / "sessions"
 
 
 def _build_bot_command_list(
-    tr: Translator, commands: list[CommandDef]
+    tr: Translator, commands: list[CommandDef], *, tasks_enabled: bool = False
 ) -> list[BotCommand]:
     builtin = [
         BotCommand(command="start",   description=tr.t("bot_command_start")),
         BotCommand(command="new",     description=tr.t("bot_command_new")),
         BotCommand(command="sess",    description=tr.t("bot_command_sess")),
+        *(
+            [
+                BotCommand(command="tasks", description=tr.t("bot_command_tasks")),
+                BotCommand(command="task", description=tr.t("bot_command_task")),
+            ]
+            if tasks_enabled
+            else []
+        ),
         BotCommand(command="context", description=tr.t("bot_command_context")),
         BotCommand(command="plan",    description=tr.t("bot_command_plan")),
         BotCommand(command="cancel",  description=tr.t("bot_command_cancel")),
@@ -221,6 +234,26 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     add_dirs: list[str] = []
     if cfg.uploads_dir:
         add_dirs.append(cfg.uploads_dir)
+
+    # Build the task store + service before the agent so the Claude backend can
+    # expose a per-chat `task` tool that reuses the same permission/scan rules.
+    tasks: TaskStore | None = None
+    task_service: TaskService | None = None
+    if cfg.tasks_enabled and cfg.tasks_dir:
+        tasks = TaskStore(Path(cfg.tasks_dir), history_limit=cfg.tasks_history_limit)
+        task_service = TaskService(tasks, cfg)
+        glog.info("[%s] tasks: %s", cfg.name, cfg.tasks_dir)
+    elif cfg.tasks_enabled:
+        glog.warning(
+            "[%s] tasks_enabled but tasks_dir is unset — tasks disabled", cfg.name
+        )
+
+    task_server_factory = (
+        (lambda chat_id: build_task_server(chat_id, task_service))
+        if task_service is not None
+        else None
+    )
+
     glog.info("[%s] agent_provider: %s", cfg.name, cfg.agent_provider)
     if cfg.agent_model:
         glog.info("[%s] agent_model: %s", cfg.name, cfg.agent_model)
@@ -231,6 +264,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         system_prompt=system_prompt,
         add_dirs=add_dirs,
         on_tool_event=tool_mirror.handle,
+        task_server_factory=task_server_factory,
     )
 
     transcriber = _make_transcriber(cfg, http, glog)
@@ -238,7 +272,9 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     plan_router = PlanRouter(agent, gate, tr, glog, cfg.name)
     album = AlbumDebouncer(glog, cfg.name)
     commands = _load_custom_commands(cfg, glog)
-    bot_command_list = _build_bot_command_list(tr, commands)
+    bot_command_list = _build_bot_command_list(
+        tr, commands, tasks_enabled=cfg.tasks_enabled
+    )
 
     ctx = BotContext(
         cfg=cfg,
@@ -258,6 +294,8 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         album=album,
         bot_command_list=bot_command_list,
         is_allowed=is_allowed,
+        tasks=tasks,
+        task_service=task_service,
     )
 
     dp = Dispatcher()
@@ -266,11 +304,34 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     dp.callback_query.outer_middleware(middleware)
     register_all(dp, commands)
 
+    scheduler: TaskScheduler | None = None
+    if tasks is not None:
+        workdir_lock = asyncio.Lock()
+        runner = TaskRunner(
+            bot=bot,
+            cfg=cfg,
+            store=tasks,
+            agent=agent,
+            log_for_chat=bot_logs.for_chat,
+            workdir_lock=workdir_lock,
+        )
+        scheduler = TaskScheduler(
+            store=tasks,
+            runner=runner,
+            cfg=cfg,
+            glog=glog,
+            is_allowed=is_allowed,
+            tick_interval=cfg.tasks_tick_interval_sec,
+        )
+        scheduler.start()
+
     await bot.set_my_commands(bot_command_list)
     try:
         await dp.start_polling(bot)
     finally:
         glog.info("[%s] shutting down", cfg.name)
+        if scheduler is not None:
+            await scheduler.stop()
         await agent.close_all()
         await bot.session.close()
 

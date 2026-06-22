@@ -19,6 +19,8 @@ from ..infra.interactions import TelegramInteractionGate
 from ..infra.logs import BotLogs
 from ..infra.session_store import SessionStore
 from ..infra.streaming import DraftStreamer
+from ..infra.task_store import TaskStore
+from ..services.task_service import TaskService
 from ..services.transcribe import GroqTranscriber
 from ..services.upload_store import UploadStore
 from ..ui.album import AlbumDebouncer
@@ -46,3 +48,7 @@ class BotContext:
     album: AlbumDebouncer
     bot_command_list: list[BotCommand]
     is_allowed: Callable[[int], bool]
+    # Scheduled-task store; None when the `tasks` feature is disabled.
+    tasks: TaskStore | None = None
+    # Permission-checked task CRUD over `tasks`; None when disabled.
+    task_service: TaskService | None = None

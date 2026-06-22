@@ -27,6 +27,8 @@ brain:
       allowed_chat_ids: []
       # Telegram chat IDs always denied, even when otherwise allowed.
       blacklist_chat_ids: []
+      # Chats allowed to create global tasks and script tasks. Empty = none.
+      admin_chat_ids: []
 
     # Voice/audio transcription via Groq; null or placeholder disables it.
     voice:
@@ -45,6 +47,26 @@ brain:
       dir: /var/lib/telegram-agent-bot/uploads
       # Reject files larger than this many bytes; 0 disables the local check.
       max_bytes: 20971520
+
+  # Scheduled tasks (one-shot / recurring, LLM / script). Disabled by default.
+  tasks:
+    # false (or omitting this section) keeps the scheduler off; /task says so.
+    enabled: false
+    # Per-bot directory for task definitions and run history.
+    dir: ../../var/brain/tasks
+    # Directory holding runnable *.sh / *.py task scripts (admins only).
+    scripts_dir: ../../var/brain/scripts
+    # How often the scheduler checks for due tasks, in seconds.
+    tick_interval_sec: 60
+    # Truncate delivered/stored task output to this many characters.
+    max_output_chars: 4000
+    # Hard timeout for a single script run, in seconds.
+    script_timeout_sec: 300
+    # Keep at most this many run-history records per task (oldest pruned).
+    history_limit: 100
+    # Tools an LLM task may use without interactive approval. Omit for the
+    # read-only default (Read, Glob, Grep, WebFetch); [] disables all tools.
+    allowed_tools: [Read, Glob, Grep, WebFetch]
 
   # Agent backend settings shared by Claude, Codex, and PI.
   agent:

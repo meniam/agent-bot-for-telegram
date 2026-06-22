@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from claude_agent_sdk import (
+    McpSdkServerConfig,
     PermissionResultAllow,
     PermissionResultDeny,
     ToolPermissionContext,
@@ -30,6 +31,7 @@ def create_agent_backend(
     system_prompt: str,
     add_dirs: list[str],
     on_tool_event: ToolEventCallback | None,
+    task_server_factory: Callable[[int], McpSdkServerConfig | None] | None = None,
     codex_factory: Callable[[], Any] | None = None,
     pi_transport_factory: Callable[[str | None], Any] | None = None,
 ) -> AgentBackend:
@@ -43,6 +45,7 @@ def create_agent_backend(
             add_dirs=add_dirs,
             on_tool_event=on_tool_event,
             initial_model=cfg.agent_model,
+            task_server_factory=task_server_factory,
         )
     if cfg.agent_provider == "codex":
         return CodexAgentBackend(

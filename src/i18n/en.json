@@ -1,6 +1,22 @@
 {
   "start_greeting": "Hi. Ask me anything — I reply through the agent.\nCommands: /new — start a fresh session.",
   "new_session_confirmation": "Fresh agent session started. Context cleared.",
+  "session_default_title": "New session",
+  "bot_command_sess": "List / switch sessions",
+  "sess_list_header": "Open sessions:",
+  "sess_list_empty": "No sessions yet. Send a message — I'll create the first one.",
+  "sess_current_marker": "▸",
+  "sess_switched": "Switched to session: {title}",
+  "sess_not_found": "Session #{ordinal} not found. /sess — list.",
+  "sess_usage": "Usage: /sess — list, /sess <number> — switch.",
+  "sess_delete_mode_btn": "🗑 Delete session",
+  "sess_back_btn": "⬅️ Back",
+  "sess_delete_header": "Pick a session to delete:",
+  "sess_delete_confirm": "🗑 Delete “{title}”?",
+  "sess_delete_yes": "✅ Yes",
+  "sess_delete_no": "❌ No",
+  "sess_deleted": "Session “{title}” deleted",
+  "sess_delete_cancelled": "Cancelled",
   "empty_answer": "(empty response)",
   "error_prefix": "Error: {error}",
   "error_internal": "Internal error: {error}. See logs for details.",
@@ -19,7 +35,17 @@
   "plan_mode_armed": "📋 Plan mode armed. Send the task as the next message — text or voice. /cancel to abort.",
   "plan_mode_failed": "⚠️ Failed to engage plan mode: {error}",
   "context_header": "📊 Context: {pct}% ({used} / {max} tokens, {free} free)\nModel: {model}",
+  "context_title": "📊 **Context**",
   "context_categories": "Categories:",
+  "context_lbl_provider": "Provider",
+  "context_lbl_model": "Model",
+  "context_lbl_fill": "Filled",
+  "context_lbl_tokens": "Tokens",
+  "context_lbl_free": "Free",
+  "context_col_category": "Category",
+  "context_col_tokens": "Tokens",
+  "context_col_pct": "%",
+  "context_cat_empty": "_No categories yet._",
   "context_error": "📊 Failed to fetch context stats: {error}",
   "bot_command_stop": "Interrupt current agent response",
   "bot_command_mode": "Switch permission mode",
@@ -63,12 +89,19 @@
   "info_commands_count": "CLI commands: {n}",
   "info_unavailable": "ℹ️ Info unavailable (no active session).",
   "info_error": "ℹ️ Error: {error}",
-  "whoami_body": "👤 chat_id: `{chat_id}`\nAccess: {access}\nMode: `{mode}`\nSession: {session}",
+  "whoami_body": "👤 **{name}**\n\n| Field | Value |\n|---|---|\n| Username | {username} |\n| user_id | `{user_id}` |\n| chat_id | `{chat_id}` |\n| Language | {lang} |\n| Premium | {premium} |\n| Access | {access} |\n| Mode | `{mode}` |\n| Session | {session} |",
   "whoami_access_open": "open bot (allowed_for_all)",
   "whoami_access_allowed": "✅ allowed (whitelist)",
   "whoami_session_yes": "active",
   "whoami_session_no": "none",
+  "whoami_none": "—",
+  "whoami_yes": "yes",
+  "whoami_no": "no",
   "help_header": "Bot commands:",
+  "help_group_sessions": "💬 Sessions",
+  "help_group_agent": "⚙️ Agent control",
+  "help_group_info": "ℹ️ Info",
+  "help_group_custom": "🧩 Custom commands",
   "help_example_plan": "example: `/plan refactor the auth module`",
   "help_example_mode": "example: `/mode plan` or `/mode` for inline buttons",
   "help_example_model": "example: `/model claude-sonnet-4-6` or `/model` for inline buttons",
@@ -135,13 +168,63 @@
   "file_delivery_empty": "📎 The agent did not specify files to send.",
   "default_reaction": "👀",
   "reactions": [
-    {"pattern": "thanks|thank you|\\bthx\\b|appreciate", "emoji": "❤"},
-    {"pattern": "\\berror\\b|\\bbug\\b|broken|crash|exception|traceback|doesn't work|not working", "emoji": "🤯"},
-    {"pattern": "\\bjoke\\b|\\blol\\b|\\blmao\\b|hilarious|🤣|😂", "emoji": "😁"},
-    {"pattern": "awesome|\\bcool\\b|amazing|🔥|nicely done|brilliant", "emoji": "🔥"},
-    {"pattern": "\\bcode\\b|\\bdef\\b|\\bscript\\b|function|program", "emoji": "👨‍💻"},
-    {"pattern": "good job|great\\b|\\bnice\\b|👏|well done", "emoji": "👏"},
-    {"pattern": "hello|\\bhi\\b|\\bhey\\b|good (morning|afternoon|evening)", "emoji": "🤝"},
-    {"pattern": "\\?|\\bhelp\\b|\\bwhy\\b|\\bhow\\b|explain|what is", "emoji": "🤔"}
-  ]
+    {
+      "pattern": "thanks|thank you|\\bthx\\b|appreciate",
+      "emoji": "❤"
+    },
+    {
+      "pattern": "\\berror\\b|\\bbug\\b|broken|crash|exception|traceback|doesn't work|not working",
+      "emoji": "🤯"
+    },
+    {
+      "pattern": "\\bjoke\\b|\\blol\\b|\\blmao\\b|hilarious|🤣|😂",
+      "emoji": "😁"
+    },
+    {
+      "pattern": "awesome|\\bcool\\b|amazing|🔥|nicely done|brilliant",
+      "emoji": "🔥"
+    },
+    {
+      "pattern": "\\bcode\\b|\\bdef\\b|\\bscript\\b|function|program",
+      "emoji": "👨‍💻"
+    },
+    {
+      "pattern": "good job|great\\b|\\bnice\\b|👏|well done",
+      "emoji": "👏"
+    },
+    {
+      "pattern": "hello|\\bhi\\b|\\bhey\\b|good (morning|afternoon|evening)",
+      "emoji": "🤝"
+    },
+    {
+      "pattern": "\\?|\\bhelp\\b|\\bwhy\\b|\\bhow\\b|explain|what is",
+      "emoji": "🤔"
+    }
+  ],
+  "task_disabled": "Tasks are disabled in this bot's config.",
+  "task_usage": "Task management:\n/task add <schedule> | <prompt> — LLM task\n/task add <schedule> --script <file> — script task (admin)\n/task list — list\n/task show <id> — detail\n/task pause <id> / resume <id>\n/task run <id> — run now\n/task rm <id> — delete\n\nSchedule: \"2h\", \"every 30m\", \"0 9 * * *\", \"2026-07-01T09:00\".\nFlags: --global (admin), --name <name>, --exclusive.",
+  "task_created": "Task created: {id} ({schedule})",
+  "task_global_created": "Global task created: {id} ({schedule})",
+  "task_add_error": "Could not create task: {error}",
+  "task_admin_only": "Only an admin can create global and script tasks.",
+  "task_list_empty": "No tasks yet.",
+  "task_list_header": "Your tasks:",
+  "task_not_found": "Task not found: {id}",
+  "task_paused": "Task {id} paused.",
+  "task_resumed": "Task {id} resumed.",
+  "task_removed": "Task {id} removed.",
+  "task_triggered": "Task {id} triggered.",
+  "task_no_broadcast_targets": "No broadcast targets for the global task.",
+  "task_table_title": "📋 Active tasks",
+  "task_table_head_name": "Task",
+  "task_table_head_schedule": "Schedule",
+  "task_table_head_next": "Next run",
+  "task_table_head_status": "Status",
+  "task_state_scheduled": "🟢 active",
+  "task_state_paused": "⏸ paused",
+  "task_state_error": "⚠️ error",
+  "bot_command_tasks": "List active tasks",
+  "bot_command_task": "Scheduled tasks",
+  "help_example_tasks": "shows active tasks as a table (archived excluded)",
+  "help_example_task": "e.g. `/task add every 1d | summarize my notes`, `/task list`"
 }

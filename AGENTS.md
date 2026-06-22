@@ -127,11 +127,12 @@ Use [CONFIG.md](CONFIG.md) for the full field reference.
 
 1. selectors: `/mode`, `/model`
 2. basic built-ins
-3. `/plan` and gate callbacks
-4. custom commands
-5. greedy `F.text`
-6. voice/audio
-7. uploads
+3. `/sess`, `/task`
+4. `/plan` and gate callbacks
+5. custom commands
+6. greedy `F.text`
+7. voice/audio
+8. uploads
 
 Custom commands must be registered before `F.text`.
 
@@ -158,9 +159,9 @@ Input flow essentials:
 ## Slash Commands
 
 Built-ins live in `handlers/basic.py`, `handlers/plan.py`,
-`handlers/selectors.py`, and `handlers/sessions.py`: `/start`, `/new`,
-`/sess`, `/cancel`, `/context`, `/stop`, `/mode`, `/model`, `/plan`, `/mcp`,
-`/info`, `/whoami`, `/help`.
+`handlers/selectors.py`, `handlers/sessions.py`, and `handlers/tasks.py`:
+`/start`, `/new`, `/sess`, `/task`, `/cancel`, `/context`, `/stop`, `/mode`,
+`/model`, `/plan`, `/mcp`, `/info`, `/whoami`, `/help`.
 
 Custom commands are `*.md` files in `commands_dir`. Each file is one command.
 Frontmatter supports `name:` and `description:`. The body is sent to Claude as
@@ -246,6 +247,39 @@ permission decisions, tool hooks, uploads, plan decisions, and errors.
 
 ---
 
+## Scheduled Tasks
+
+Opt-in per bot via the `tasks` config section (default off). When enabled,
+`run_bot` builds a `TaskStore` (passed into `BotContext.tasks`), a `TaskRunner`,
+and a `TaskScheduler`, starts the scheduler before polling, and stops it in the
+`finally`. All logic lives in `src/infra/task_{types,store,runner,scheduler}.py`;
+`bot.py` stays wiring-only.
+
+- A `Task` is one-shot or recurring (`schedule.kind` = `once`/`interval`/`cron`)
+  and LLM or script (`kind`). Stored as JSON per chat under `tasks_dir`
+  (`<chat_id>.json`, `global.json`), with append-only run history in
+  `history/<task_id>/`. Writes are atomic + `fsync` (a lost task means a missed
+  run); unparsable files are quarantined to `_corrupt/`.
+- The scheduler ticks every `tick_interval_sec`, runs due tasks fire-and-forget
+  (deduped by id), and advances `next_run_at` **before** running so a slow run
+  never double-fires. There is no missed-run backlog; restart catch-up uses a
+  grace window (one-shot 120s; recurring period/2, clamped) — past it, one-shots
+  complete without running and recurring tasks fast-forward.
+- LLM tasks run via `AgentBackend.ask_ephemeral` — a throwaway SDK session that
+  never touches the chat's live session or `current` pointer. Permissions are
+  non-interactive: only `tasks.allowed_tools` are allowed (default read-only),
+  everything else is denied (no Telegram gate; nobody is watching).
+- Concurrency: a per-bot `workdir_lock` serializes everything that mutates
+  `working_dir` (all LLM tasks + `exclusive` scripts); independent scripts run
+  in parallel. Live user turns are **not** under this lock (out of scope).
+- Access: `/task` is a normal ACL handler. Users manage only their own
+  `scope=user` tasks; `admin_chat_ids` may create/manage `scope=global` and
+  `kind=script` tasks. Before each run the scheduler re-checks owner access and
+  pauses tasks whose owner lost it (`last_error=access_revoked`). Global task
+  output broadcasts to `allowed_chat_ids` minus `blacklist_chat_ids`.
+
+---
+
 ## i18n and User-Facing Text
 
 All user-facing strings must go through `Translator.t(key, **kwargs)` and live
@@ -259,12 +293,14 @@ language.
 ## Tests
 
 Unit tests cover pure modules: config, commands, i18n, uploads, markdown,
-reactions, SDK view formatting, plan router, streaming redaction, log LRU, and
-bot factories.
+reactions, SDK view formatting, plan router, streaming redaction, log LRU,
+bot factories, and the task subsystem (schedule math, store, runner script
+execution, scheduler dispatch/grace).
 
 Not deeply unit-tested: aiogram handler wiring, live Claude SDK calls, Telegram
-Bot API integration, transcriber, album debouncer, permission gate flows, and
-tool-status mirror. Validate those manually when touched.
+Bot API integration, transcriber, album debouncer, permission gate flows,
+tool-status mirror, and the `/task` handler. Validate those manually when
+touched.
 
 ---
 

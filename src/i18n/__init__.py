@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+# Language selected when a bot specifies none / an unknown one.
 DEFAULT_LANG = "ru"
+# Source of per-key fallback strings for any locale missing a key.
+FALLBACK_LANG = "en"
 _DIR = Path(__file__).resolve().parent
 
 
@@ -21,13 +24,13 @@ class Translator:
             self.lang = DEFAULT_LANG
         with path.open(encoding="utf-8") as f:
             self._strings: dict[str, str] = json.load(f)
-        # Per-key fallback to the default language so newly added keys do not
-        # surface as raw identifiers in not-yet-translated language files.
+        # Per-key fallback to FALLBACK_LANG so newly added keys do not surface
+        # as raw identifiers in not-yet-translated language files.
         self._fallback: dict[str, str] = {}
-        if self.lang != DEFAULT_LANG:
-            default_path = _DIR / f"{DEFAULT_LANG}.json"
-            if default_path.exists():
-                with default_path.open(encoding="utf-8") as f:
+        if self.lang != FALLBACK_LANG:
+            fallback_path = _DIR / f"{FALLBACK_LANG}.json"
+            if fallback_path.exists():
+                with fallback_path.open(encoding="utf-8") as f:
                     self._fallback = json.load(f)
 
     def t(self, key: str, **kwargs: object) -> str:

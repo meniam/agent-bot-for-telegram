@@ -1,4 +1,6 @@
 .claude/
+.codex/
+.pi/
 .env
 .data
 config.json
@@ -11,6 +13,7 @@ logs/
 uploads/
 commands/
 var/
+docs/plans/
 AUDIT.md
 promo.txt
 /bot.log
