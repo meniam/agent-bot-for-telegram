@@ -5,11 +5,21 @@ File layout:
   <logs_dir>/<internal_name>/<chat_id>.log   — chat events (user/bot/errors)
 """
 
+from __future__ import annotations
+
 import contextlib
 import logging
 import logging.handlers
 from collections import OrderedDict
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .message_db import SqliteChatLogHandler
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from .session_store import Session
 
 GENERAL_FMT = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 CHAT_FMT = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
@@ -46,10 +56,13 @@ class BotLogs:
         name: str,
         base_dir: Path | None,
         capacity: int = DEFAULT_CHAT_LOGGER_CAPACITY,
+        messages_dir: Path | None = None,
     ) -> None:
         self._name = name
         self._base = base_dir
         self._capacity = capacity
+        self._messages_dir = messages_dir
+        self._session_resolver: Callable[[int], Session | None] | None = None
         self._chat_loggers: OrderedDict[int, logging.Logger] = OrderedDict()
         self._general = logging.getLogger(f"bot.{name}")
         self._general.setLevel(logging.INFO)
@@ -70,6 +83,17 @@ class BotLogs:
     def general(self) -> logging.Logger:
         return self._general
 
+    def set_session_resolver(
+        self, resolver: Callable[[int], Session | None]
+    ) -> None:
+        """Inject the current-session lookup used to tag SQLite message rows.
+
+        Set after the `SessionStore` exists (it is built later than `BotLogs`).
+        Per-chat loggers are created lazily on the first message, i.e. after
+        this is set, so existing handlers need no retrofit.
+        """
+        self._session_resolver = resolver
+
     def for_chat(self, chat_id: int) -> logging.Logger:
         if self._base is None:
             return _NOOP
@@ -89,6 +113,24 @@ class BotLogs:
         )
         handler.setFormatter(CHAT_FMT)
         log.addHandler(handler)
+
+        # Structured SQLite mirror at <messages_dir>/<chat_id>.db (configurable;
+        # defaults to <logs_dir>/messages). Per-chat file, no <bot> segment.
+        # None → SQLite logging disabled (e.g. in unit tests).
+        if self._messages_dir is not None:
+            self._messages_dir.mkdir(parents=True, exist_ok=True)
+            resolver = self._session_resolver
+            session_of = (
+                (lambda cid=chat_id: resolver(cid))
+                if resolver is not None
+                else None
+            )
+            log.addHandler(
+                SqliteChatLogHandler(
+                    self._messages_dir / f"{chat_id}.db", session_of
+                )
+            )
+
         self._chat_loggers[chat_id] = log
 
         while len(self._chat_loggers) > self._capacity:

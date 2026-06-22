@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-code-telegram-agent-bot"
+name = "abt"
 version = "0.1.0"
-description = "Multi-bot Telegram agent for the Claude Agent SDK"
+description = "Multi-bot Telegram agent gateway for Claude, Codex, and PI.dev backends"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-agent-bot = "src.bot:_cli"
+abt = "src.bot:_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

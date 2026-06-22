@@ -1,5 +1,6 @@
 """DraftStreamer: build_draft_html and stream behaviour."""
 
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -66,7 +67,7 @@ async def test_stream_calls_send_draft() -> None:
         yield StreamChunk(kind="text", text="hi")
 
     await streamer.stream(42, _chunks())
-    streamer._bot.send_rich_message_draft.assert_called()
+    cast(AsyncMock, streamer._bot.send_rich_message_draft).assert_called()
 
 
 @pytest.mark.asyncio
@@ -77,7 +78,7 @@ async def test_stream_empty_chunks() -> None:
 
     async def _chunks() -> AsyncGenerator[StreamChunk, None]:
         return
-        yield StreamChunk(kind="text", text="")  # noqa: unreachable
+        yield StreamChunk(kind="text", text="")
 
     result = await streamer.stream(42, _chunks())
     assert result == ""

@@ -9,6 +9,7 @@ import src.infra.codex_agent as codex_agent_module
 import src.infra.pi_agent as pi_agent_module
 from src.config import BotConfig
 from src.infra.agent_factory import create_agent_backend
+from src.infra.agent_types import StreamChunk
 from src.infra.claude_agent import ClaudeAgentBackend
 from src.infra.codex_agent import CodexAgentBackend
 from src.infra.pi_agent import PiAgentBackend
@@ -198,7 +199,7 @@ class _FakeStreamTurn:
         self.closed = True
 
 
-class _FakeThread:
+class _ThreadBase:
     id = "thread-1"
 
     def __init__(self) -> None:
@@ -206,15 +207,17 @@ class _FakeThread:
         self.model: str | None = None
         self.closed = False
 
-    async def run(self, prompt: str) -> _FakeResult:
-        self.prompts.append(prompt)
-        return _FakeResult()
-
     async def set_model(self, model: str | None) -> None:
         self.model = model
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _FakeThread(_ThreadBase):
+    async def run(self, prompt: str) -> _FakeResult:
+        self.prompts.append(prompt)
+        return _FakeResult()
 
 
 class _StreamingThread(_FakeThread):
@@ -249,7 +252,7 @@ class _SlowTurn:
         self._done.set()
 
 
-class _SlowThread(_FakeThread):
+class _SlowThread(_ThreadBase):
     def __init__(self) -> None:
         super().__init__()
         self.turn_handle = _SlowTurn()
@@ -292,6 +295,8 @@ class _FakeCodex:
 
 
 class _StreamingCodex(_FakeCodex):
+    thread: _StreamingThread
+
     def __init__(self) -> None:
         self.thread = _StreamingThread()
         self.thread_start_kwargs: dict[str, object] = {}
@@ -530,7 +535,7 @@ async def test_codex_reset_force_closes_active_session() -> None:
         codex_factory=lambda: fake,
     )
 
-    async def consume() -> list[str]:
+    async def consume() -> list[StreamChunk]:
         return [chunk async for chunk in backend.ask_stream(10, "hello")]
 
     task = asyncio.create_task(consume())
@@ -685,7 +690,7 @@ async def test_pi_reset_force_closes_active_session() -> None:
         transport_factory=lambda _model: fake,
     )
 
-    async def consume() -> list[str]:
+    async def consume() -> list[StreamChunk]:
         return [chunk async for chunk in backend.ask_stream(10, "hello")]
 
     task = asyncio.create_task(consume())

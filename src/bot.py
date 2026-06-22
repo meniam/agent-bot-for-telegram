@@ -22,7 +22,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
 
 from .config import BotConfig
 from .config import load as load_config
@@ -51,6 +51,51 @@ from .ui.tool_status import ToolStatusMirror
 
 BUILTIN_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "system_prompt.md"
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / "var" / "sessions"
+SKILLS_DIR = Path(__file__).resolve().parent.parent / ".agents" / "skills"
+
+# Per-provider skills directory (relative to working_dir) the agent scans.
+PROVIDER_SKILLS_SUBDIR: dict[str, str] = {
+    "claude": ".claude/skills",
+    "codex": ".codex/skills",
+    "pi": ".pi/skills",
+}
+
+
+def _link_skills(
+    working_dir: str | None, provider: str, glog: logging.Logger, name: str
+) -> None:
+    """Symlink runtime skills from ``.agents/skills`` into the provider's dir.
+
+    The agent runs with ``cwd=working_dir`` and scans the current provider's
+    skills directory (``.claude/skills`` for Claude, etc.). Linking (not copying)
+    keeps ``.agents/skills`` the single source of truth. Existing real
+    directories are left untouched; only our own stale symlinks are refreshed.
+    """
+    subdir = PROVIDER_SKILLS_SUBDIR.get(provider)
+    if not working_dir or subdir is None or not SKILLS_DIR.is_dir():
+        return
+    target_root = Path(working_dir).expanduser() / subdir
+    try:
+        target_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        glog.warning("[%s] skills dir create failed %s: %s", name, target_root, exc)
+        return
+    for src in sorted(SKILLS_DIR.iterdir()):
+        if not src.is_dir():
+            continue
+        link = target_root / src.name
+        try:
+            if link.is_symlink():
+                if link.resolve() == src.resolve():
+                    continue
+                link.unlink()
+            elif link.exists():
+                glog.warning("[%s] skill not linked, real dir exists: %s", name, link)
+                continue
+            link.symlink_to(src, target_is_directory=True)
+            glog.info("[%s] linked skill: %s -> %s", name, link.name, src)
+        except OSError as exc:
+            glog.warning("[%s] skill link failed %s: %s", name, link, exc)
 
 
 def _build_bot_command_list(
@@ -94,14 +139,29 @@ def _make_bot(cfg: BotConfig) -> Bot:
     )
 
 
+def _messages_dir(cfg: BotConfig) -> Path | None:
+    """Per-chat SQLite dir: explicit `messages_dir`, else `<logs_dir>/messages`.
+
+    None when no `logs_dir` (SQLite message logging disabled); `SessionStore`
+    then falls back to its own dir under `var/sessions`.
+    """
+    if cfg.messages_dir:
+        return Path(cfg.messages_dir)
+    if cfg.logs_dir:
+        return Path(cfg.logs_dir) / "messages"
+    return None
+
+
 def _make_logs(cfg: BotConfig) -> tuple[BotLogs, logging.Logger, Path | None]:
     bot_log_dir: Path | None = None
     if cfg.logs_dir:
         bot_log_dir = Path(cfg.logs_dir) / cfg.name
+    messages_dir = _messages_dir(cfg)
     bot_logs = BotLogs(
         name=cfg.name,
         base_dir=bot_log_dir,
         capacity=cfg.chat_logger_capacity,
+        messages_dir=messages_dir,
     )
     return bot_logs, bot_logs.general, bot_log_dir
 
@@ -199,6 +259,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     glog.info("[%s] lang: %s", cfg.name, cfg.lang)
     if cfg.working_dir:
         glog.info("[%s] working_dir: %s", cfg.name, cfg.working_dir)
+        _link_skills(cfg.working_dir, cfg.agent_provider, glog, cfg.name)
     if bot_log_dir:
         glog.info("[%s] logs: %s", cfg.name, bot_log_dir)
 
@@ -207,12 +268,17 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     reaction_picker = ReactionPicker.from_translator(tr)
     is_allowed = _make_acl(cfg, glog)
 
-    sessions_base = Path(cfg.sessions_dir) if cfg.sessions_dir else SESSIONS_DIR
+    # Sessions live in the same per-chat .db as the message log; without a
+    # logs/messages dir they get a standalone db dir under var/sessions.
+    session_base = _messages_dir(cfg) or (SESSIONS_DIR / cfg.name)
     sessions = SessionStore(
-        sessions_base / cfg.name,
+        session_base,
         default_title=tr.t("session_default_title"),
     )
-    glog.info("[%s] sessions: %s", cfg.name, sessions_base / cfg.name)
+    # Tag SQLite message rows with the chat's current session (BotLogs is built
+    # before SessionStore, so the resolver is injected here).
+    bot_logs.set_session_resolver(sessions.current)
+    glog.info("[%s] sessions: %s", cfg.name, session_base)
 
     streamer = DraftStreamer(
         bot,
@@ -326,6 +392,9 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         scheduler.start()
 
     await bot.set_my_commands(bot_command_list)
+    await bot.set_my_commands(
+        bot_command_list, scope=BotCommandScopeAllPrivateChats()
+    )
     try:
         await dp.start_polling(bot)
     finally:

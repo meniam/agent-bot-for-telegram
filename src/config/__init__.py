@@ -51,7 +51,7 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
     "paths": {
         "working_dir": "working_dir",
         "logs_dir": "logs_dir",
-        "sessions_dir": "sessions_dir",
+        "messages_dir": "messages_dir",
         "commands_dir": "commands_dir",
     },
     "pi": {
@@ -91,7 +91,7 @@ GATEWAY_CONFIG_FIELDS: dict[str, str] = {
     "telegram_bot_token": "telegram_bot_token",
     "lang": "lang",
     "logs_dir": "logs_dir",
-    "sessions_dir": "sessions_dir",
+    "messages_dir": "messages_dir",
     "commands_dir": "commands_dir",
     "allowed_for_all": "allowed_for_all",
     "allowed_chat_ids": "allowed_chat_ids",
@@ -153,8 +153,8 @@ class BotConfig(BaseModel):
     chat_logger_capacity: int = 256
     working_dir: str | None = None
     logs_dir: str | None = None
-    # Directory for per-chat session metadata JSON. None → var/sessions.
-    sessions_dir: str | None = None
+    # Directory for per-chat SQLite message logs. None → <logs_dir>/messages.
+    messages_dir: str | None = None
     lang: str = "ru"
     # Voice/audio transcription via Groq. None disables the feature; the
     # voice handler then replies with `voice_disabled`.
@@ -340,11 +340,11 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         ld.mkdir(parents=True, exist_ok=True)
         logs_dir = str(ld)
 
-    sessions_dir = data.get("sessions_dir")
-    if sessions_dir:
-        sd = _resolve_path(sessions_dir, base_dir)
-        sd.mkdir(parents=True, exist_ok=True)
-        sessions_dir = str(sd)
+    messages_dir = data.get("messages_dir")
+    if messages_dir:
+        md = _resolve_path(messages_dir, base_dir)
+        md.mkdir(parents=True, exist_ok=True)
+        messages_dir = str(md)
 
     uploads_dir = data.get("uploads_dir")
     if uploads_dir:
@@ -421,7 +421,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "pi_session_persistence": data.get("pi_session_persistence", False),
         "working_dir": working_dir,
         "logs_dir": logs_dir,
-        "sessions_dir": sessions_dir,
+        "messages_dir": messages_dir,
         "uploads_dir": uploads_dir,
         "commands_dir": commands_dir,
         "allowed_chat_ids": allowed_chat_ids,

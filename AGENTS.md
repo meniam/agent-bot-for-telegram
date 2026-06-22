@@ -51,7 +51,7 @@ pip install -e ".[dev]"
 
 python -m src.bot
 # or
-agent-bot
+abt
 ```
 
 Expected green checks:
@@ -103,10 +103,8 @@ Important optional features:
 - `commands_dir: null` disables custom slash commands.
 - configured `uploads_dir` is also passed to Claude SDK `add_dirs`.
 - `system_prompt: null` falls back to i18n key `default_system_prompt`.
-- `sessions_dir: null` uses `var/sessions`; set it to relocate per-chat
-  session metadata.
 
-Path fields (`working_dir`, `logs_dir`, `sessions_dir`, `uploads_dir`,
+Path fields (`working_dir`, `logs_dir`, `uploads_dir`,
 `commands_dir`) expand `~` and resolve **relative to the config file's
 directory** (`src/config/`), not the process CWD. Absolute paths pass
 through unchanged.
@@ -127,12 +125,14 @@ Use [CONFIG.md](CONFIG.md) for the full field reference.
 
 1. selectors: `/mode`, `/model`
 2. basic built-ins
-3. `/sess`, `/task`
-4. `/plan` and gate callbacks
-5. custom commands
-6. greedy `F.text`
-7. voice/audio
-8. uploads
+3. `/sess` (sessions)
+4. `/task`, `/tasks` (tasks)
+5. `/plan` and gate callbacks
+6. questionnaire (`AskUserQuestion` poll callbacks)
+7. custom commands
+8. greedy `F.text`
+9. voice/audio
+10. uploads
 
 Custom commands must be registered before `F.text`.
 
@@ -152,7 +152,7 @@ Input flow essentials:
 - Voice/audio cancels active `AskUserQuestion`, transcribes via Groq, echoes
   the transcript, then either fires armed `/plan` or a normal agent turn.
 - Uploads cancel active `AskUserQuestion`, save files, debounce albums, then
-  pass absolute paths to Claude via the attachment prompt.
+  pass absolute paths to the agent via the attachment prompt.
 
 ---
 
@@ -160,12 +160,12 @@ Input flow essentials:
 
 Built-ins live in `handlers/basic.py`, `handlers/plan.py`,
 `handlers/selectors.py`, `handlers/sessions.py`, and `handlers/tasks.py`:
-`/start`, `/new`, `/sess`, `/task`, `/cancel`, `/context`, `/stop`, `/mode`,
-`/model`, `/plan`, `/mcp`, `/info`, `/whoami`, `/help`.
+`/start`, `/new`, `/sess`, `/task`, `/tasks`, `/cancel`, `/context`, `/stop`,
+`/mode`, `/model`, `/plan`, `/mcp`, `/info`, `/whoami`, `/help`.
 
 Custom commands are `*.md` files in `commands_dir`. Each file is one command.
-Frontmatter supports `name:` and `description:`. The body is sent to Claude as
-the prompt, with `$ARGUMENTS` replaced by text after the command. Built-in
+Frontmatter supports `name:` and `description:`. The body is sent to the agent
+as the prompt, with `$ARGUMENTS` replaced by text after the command. Built-in
 names cannot be overridden. Commands load once at startup.
 
 Full custom command reference: [COMMANDS.md](COMMANDS.md).
@@ -211,9 +211,11 @@ closes or drops idle sessions when `session_idle_ttl_sec > 0`.
 ### Multi-session per chat
 
 Each chat owns several **named** sessions. The meta layer is `SessionStore`
-(`infra/session_store.py`): one JSON file per chat at
-`var/sessions/<bot_name>/<chat_id>.json` listing sessions (`id`, `title`,
-`auto_titled`, timestamps) plus a `current` pointer. `var/` is gitignored.
+(`infra/session_store.py`): it owns the `sessions` table (`id`, `title`,
+`auto_titled`, timestamps) plus a `chat_meta` `current` pointer in the **same**
+per-chat SQLite file as the message log (`<messages_dir>/<chat_id>.db`; falls
+back to `var/sessions/<bot_name>/<chat_id>.db` when no logs/messages dir). Ops
+open a short-lived connection per call — no cache. `var/` is gitignored.
 
 The Claude SDK already persists conversation history on disk keyed by
 `session_id` (UUID); the bot reuses that: a new session is created with
@@ -294,13 +296,13 @@ language.
 
 Unit tests cover pure modules: config, commands, i18n, uploads, markdown,
 reactions, SDK view formatting, plan router, streaming redaction, log LRU,
-bot factories, and the task subsystem (schedule math, store, runner script
-execution, scheduler dispatch/grace).
+bot factories, agent backends, the session store, the SQLite message log + FTS
+search, questionnaire rendering, and the task subsystem (schedule math, store,
+runner script execution, scheduler dispatch/grace).
 
-Not deeply unit-tested: aiogram handler wiring, live Claude SDK calls, Telegram
-Bot API integration, transcriber, album debouncer, permission gate flows,
-tool-status mirror, and the `/task` handler. Validate those manually when
-touched.
+Not deeply unit-tested: aiogram handler wiring, live agent SDK calls, Telegram
+Bot API integration, transcriber, album debouncer, and permission gate flows.
+Validate those manually when touched.
 
 ---
 

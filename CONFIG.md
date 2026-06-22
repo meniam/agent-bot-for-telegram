@@ -215,15 +215,21 @@ Each section: type, default, semantics, valid values, related fields.
   file is additive.
 - **See also:** `chat_logger_capacity` (cap on cached per-chat loggers).
 
-### `sessions_dir`
+### `messages_dir`
 
 - **Type:** `str | null`.
-- **Default:** `null` → `var/sessions` at the repo root.
-- **Semantics:** base directory for per-chat session metadata. Each bot
-  gets `<sessions_dir>/<internal_name>/<chat_id>.json` (the meta layer over
-  the SDK's own history — see [src/infra/session_store.py](src/infra/session_store.py)).
-- **Validation:** `~/...` expanded; directory created automatically
-  (`mkdir(parents=True, exist_ok=True)`).
+- **Default:** `null` → `<logs_dir>/messages`; if `logs_dir` is also unset,
+  SQLite message logging is **disabled** and `SessionStore` falls back to its
+  own dir under `var/sessions`.
+- **Semantics:** root for the per-chat SQLite message log
+  (`<messages_dir>/<chat_id>.db`). Each `.db` mirrors every chat event with role
+  + session and carries an FTS5 trigram index for substring search across
+  history; it also holds live session metadata
+  ([src/infra/session_store.py](src/infra/session_store.py),
+  [src/infra/message_db.py](src/infra/message_db.py)).
+- **Validation:** `~/...` and relative paths resolved against the config file's
+  directory; created automatically (`mkdir(parents=True, exist_ok=True)`).
+- **Resolution:** [src/bot.py](src/bot.py) `_messages_dir`.
 
 ### `draft_interval_sec`
 
@@ -437,7 +443,7 @@ brain:
 
 - `enabled` — master switch. Default `false`.
 - `dir` — per-bot directory for task JSON + run history. Resolved relative to
-  the config file (like `sessions_dir`); written **as-is**, no `<bot_name>`
+  the config file (like `messages_dir`); written **as-is**, no `<bot_name>`
   suffix. Holds `<chat_id>.json`, `global.json`, `history/<task_id>/<ts>.json`,
   `_corrupt/`.
 - `scripts_dir` — directory of runnable `*.sh` / `*.py` task scripts. Script
@@ -492,7 +498,7 @@ The loader enforces, at startup:
 - Token presence and non-placeholder.
 - `working_dir` exists and is a directory.
 - `commands_dir` exists and is a directory.
-- `logs_dir` / `sessions_dir` / `uploads_dir` are created if absent.
+- `logs_dir` / `messages_dir` / `uploads_dir` are created if absent.
 - `allowed_chat_ids` / `blacklist_chat_ids` are arrays of integers.
 - `allowed_for_all` is a boolean.
 - `lang` is lowercased.
@@ -502,7 +508,7 @@ fail-fast on misconfiguration.
 
 ### Path resolution
 
-Every path field (`working_dir`, `logs_dir`, `sessions_dir`, `uploads_dir`,
+Every path field (`working_dir`, `logs_dir`, `messages_dir`, `uploads_dir`,
 `commands_dir`) is normalized the same way:
 
 1. `~` is expanded to the home directory.
@@ -547,8 +553,8 @@ brain:
   gateway:
     telegram_bot_token: "123456:ABC..."
     lang: en
-    logs_dir: /var/log/telegram-agent-bot
-    commands_dir: /etc/telegram-agent-bot/commands
+    logs_dir: /var/log/abt
+    commands_dir: /etc/abt/commands
     draft_interval_sec: 0.2
     approval_timeout_sec: 300
     chat_logger_capacity: 256
@@ -564,7 +570,7 @@ brain:
       max_duration_sec: 600
 
     uploads:
-      dir: /var/lib/telegram-agent-bot/uploads
+      dir: /var/lib/abt/uploads
       max_bytes: 20971520
 
   agent:
@@ -591,7 +597,7 @@ public_demo:
   gateway:
     telegram_bot_token: "789012:DEF..."
     lang: en
-    logs_dir: /var/log/telegram-agent-bot
+    logs_dir: /var/log/abt
     approval_timeout_sec: 60
 
     access:

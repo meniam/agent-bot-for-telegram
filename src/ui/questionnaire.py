@@ -142,6 +142,9 @@ async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
     if callback.message is None or callback.message.chat.id != session.chat_id:
         await callback.answer(t.t("unauthorized_callback"), show_alert=True)
         return None
+    if callback.bot is None:
+        await callback.answer()
+        return None
 
     current = session.current_index
     question = session.questionnaire.questions[current]

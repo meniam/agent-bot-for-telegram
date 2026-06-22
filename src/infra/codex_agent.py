@@ -14,7 +14,7 @@ import shutil
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
 from .session_store import Session, SessionStore
@@ -357,7 +357,7 @@ class CodexAgentBackend:
             "turn": completed,
         }
 
-    async def _handle_turn_timeout(self, chat_id: int, turn: Any) -> None:
+    async def _handle_turn_timeout(self, chat_id: int, turn: Any) -> NoReturn:
         msg = (
             "Codex run timed out after "
             f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"

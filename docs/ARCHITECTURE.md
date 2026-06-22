@@ -1,15 +1,16 @@
 # Application Architecture
 
-This document describes the current architecture of `agent-bot`. If this
+This document describes the current architecture of `abt` (Agent Bot for Telegram). If this
 document and the code disagree, the code in `src/` is the source of truth.
 
 ## 1. Purpose
 
-`agent-bot` is a multi-bot Telegram gateway for Claude Agent SDK. One Python
+`abt` is a multi-bot Telegram gateway for pluggable agent backends (Claude, Codex, PI.dev). One Python
 process can run multiple Telegram bots concurrently, one per entry in
-`src/config/config.json`. Each bot receives Telegram updates, enforces access
-control, handles optional voice and file workflows, then forwards user prompts
-to a live Claude SDK session.
+`src/config/config.yaml` (the loader tries `config.yaml` → `config.yml` →
+`config.json`). Each bot receives Telegram updates, enforces access control,
+handles optional voice and file workflows, then forwards user prompts to a live
+agent session created by the selected backend.
 
 The central architectural rule is separation of concerns. `src/bot.py` wires
 dependencies and starts polling; feature behavior lives in `handlers/`, `ui/`,
@@ -25,7 +26,8 @@ flowchart LR
     ACL --> H[handlers]
     H --> UI[ui helpers]
     UI --> ASM[AgentSessionManager]
-    ASM --> SDK[Claude Agent SDK / ClaudeSDKClient]
+    ASM --> Factory[agent_factory: claude / codex / pi backend]
+    Factory --> SDK[agent SDK session]
     SDK --> Gate[TelegramInteractionGate]
     Gate --> API
     SDK --> Hooks[ToolStatusMirror hooks]
@@ -48,10 +50,10 @@ Main dependencies:
 ```text
 src/
   bot.py                  dependency wiring, supervisor, entry point
-  config/                 BotConfig and config.json loader
+  config/                 BotConfig and yaml/yml/json loader
   handlers/               aiogram handlers for commands and inputs
   i18n/                   Translator and JSON locale files
-  infra/                  SDK sessions, gate, commands, streaming, logs
+  infra/                  agent backends, gate, commands, streaming, logs, message DB, sessions, tasks
   services/               external APIs and upload storage
   ui/                     Telegram-facing helpers and middleware
 tests/                    unit tests for pure logic and factories
@@ -64,8 +66,12 @@ Responsibilities:
 - `ui/` contains Telegram-side pipelines and helpers: replies, markdown
   rendering, reactions, ACL middleware, plan routing, album debounce, and
   tool status mirroring.
-- `infra/` contains SDK-facing and runtime infrastructure: Claude sessions,
-  the permission gate, custom command loading, logs, and draft streaming.
+- `infra/` contains agent-facing and runtime infrastructure: the pluggable
+  agent backends (`agent_factory` + `claude_agent` / `codex_agent` / `pi_agent`,
+  fronted by `AgentSessionManager`), the permission gate, custom command
+  loading, logs, draft streaming, the per-chat SQLite message log
+  (`message_db`), named multi-session metadata (`session_store`), and the
+  scheduled-task subsystem (`task_*`).
 - `services/` encapsulates external APIs and filesystem-backed upload state.
 
 ## 4. Process Startup and Multi-Bot Runtime
@@ -74,7 +80,7 @@ The runtime entry point is `src/bot.py`.
 
 1. `_cli()` calls `asyncio.run(main())`.
 2. `main()` initializes console logging through `setup_console()`.
-3. `load_config()` reads `src/config/config.json`.
+3. `load_config()` reads `src/config/config.yaml` (falls back to `.yml` / `.json`).
 4. A shared `aiohttp.ClientSession` is created.
 5. One `_supervise(cfg, http)` task is started for each `BotConfig`.
 6. `_supervise` runs `run_bot` in a loop and restarts crashed bots with
@@ -88,7 +94,7 @@ sequenceDiagram
     participant S as _supervise
     participant Bot as run_bot
 
-    Main->>Config: read config.json
+    Main->>Config: read config.yaml
     Main->>HTTP: create shared session
     Main->>S: gather one supervisor per bot
     loop per bot forever

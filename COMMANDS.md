@@ -4,7 +4,7 @@ Drop `*.md` files into a directory and the bot exposes each one as a Telegram bo
 
 ## Setup
 
-1. Pick a directory, e.g. `/etc/telegram-agent-bot/commands` or `./commands`.
+1. Pick a directory, e.g. `/etc/abt/commands` or `./commands`.
 2. Add it to `src/config/config.yaml`:
    ```yaml
    brain:
