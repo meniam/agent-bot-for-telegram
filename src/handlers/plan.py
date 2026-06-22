@@ -24,6 +24,7 @@ async def start_plan_mode(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Arm plan mode for `/plan` with no arg, or fire `/plan <prompt>` now."""
     args = (command.args or "").strip()
     if not args:
         ctx.plan_router.arm(message.chat.id, cl)
@@ -42,22 +43,26 @@ async def start_plan_mode(
 async def permission_callback(
     callback: CallbackQuery, ctx: BotContext, **_: object
 ) -> None:
+    """Forward a `perm:` button tap to the interaction gate."""
     await ctx.gate.handle_callback(callback)
 
 
 async def ask_user_question_callback(
     callback: CallbackQuery, ctx: BotContext, **_: object
 ) -> None:
+    """Forward an `aq:` button tap to the interaction gate."""
     await ctx.gate.handle_aq_callback(callback)
 
 
 async def plan_callback(
     callback: CallbackQuery, ctx: BotContext, **_: object
 ) -> None:
+    """Forward a `plan:` button tap to the interaction gate."""
     await ctx.gate.handle_plan_callback(callback)
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the `/plan` command and its gate callback handlers on ``dp``."""
     dp.message.register(start_plan_mode, Command("plan"))
     dp.callback_query.register(permission_callback, F.data.startswith("perm:"))
     dp.callback_query.register(

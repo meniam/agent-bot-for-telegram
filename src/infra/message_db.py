@@ -163,11 +163,18 @@ class SqliteChatLogHandler(logging.Handler):
         db_path: Path,
         session_of: "Callable[[], Session | None] | None" = None,
     ) -> None:
+        """Open ``db_path`` and resolve the current session via ``session_of``."""
         super().__init__()
         self._session_of = session_of
         self._conn = connect(db_path)
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Write one log record as a ``messages`` row, upserting its session.
+
+        Reads ``role``/``tool`` off the record, resolves and denormalizes the
+        current session, and commits. Errors route through ``handleError`` so a
+        write failure never propagates into the logging call site.
+        """
         try:
             role = getattr(record, "role", None) or ROLE_SYSTEM
             tool = getattr(record, "tool", None)
@@ -207,6 +214,7 @@ class SqliteChatLogHandler(logging.Handler):
             self.handleError(record)
 
     def close(self) -> None:
+        """Close the SQLite connection, then the base handler."""
         try:
             self._conn.close()
         finally:

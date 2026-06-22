@@ -12,11 +12,15 @@ _DIR = Path(__file__).resolve().parent
 
 
 def available_languages() -> list[str]:
+    """Return the sorted language codes for which a ``<lang>.json`` exists."""
     return sorted(p.stem for p in _DIR.glob("*.json"))
 
 
 class Translator:
+    """Look up translation strings for one language with per-key EN fallback."""
+
     def __init__(self, lang: str = DEFAULT_LANG) -> None:
+        """Load ``<lang>.json`` (or DEFAULT_LANG if missing) plus EN fallback."""
         self.lang = lang
         path = _DIR / f"{lang}.json"
         if not path.exists():
@@ -34,6 +38,11 @@ class Translator:
                     self._fallback = json.load(f)
 
     def t(self, key: str, **kwargs: object) -> str:
+        """Return the string for ``key``, formatted with ``kwargs`` if given.
+
+        Falls back to the EN value, then to ``key`` itself; on a formatting
+        error the unformatted string is returned.
+        """
         s = self._strings.get(key)
         if s is None:
             s = self._fallback.get(key, key)

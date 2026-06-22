@@ -30,6 +30,7 @@ class GroqTranscriber:
         base_url: str = DEFAULT_BASE_URL,
         timeout_sec: float = 60.0,
     ) -> None:
+        """Store the HTTP session, credentials, model, and request timeout."""
         self._http = http
         self._api_key = api_key
         self._model = model

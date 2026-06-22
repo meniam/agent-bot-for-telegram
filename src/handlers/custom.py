@@ -21,11 +21,14 @@ _Handler = Callable[..., Awaitable[Any]]
 
 
 def register(dp: Dispatcher, commands: list[CommandDef]) -> None:
+    """Register a handler for each user-defined slash command on ``dp``."""
     for cmd in commands:
         dp.message.register(_make_handler(cmd.body, cmd.name), Command(cmd.name))
 
 
 def _make_handler(template: str, cmd_name: str) -> _Handler:
+    """Build a handler that substitutes args into ``template`` and fires it."""
+
     async def handler(
         message: Message,
         command: CommandObject,
@@ -33,6 +36,7 @@ def _make_handler(template: str, cmd_name: str) -> _Handler:
         cl: logging.Logger,
         **_: object,
     ) -> None:
+        """Substitute `$ARGUMENTS` into the template and run an agent turn."""
         args = (command.args or "").strip()
         prompt = template.replace("$ARGUMENTS", args)
         cl.info(

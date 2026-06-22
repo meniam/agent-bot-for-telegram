@@ -22,6 +22,12 @@ async def handle(
     chat_id: int,
     tool_input: dict[str, Any],
 ) -> PermissionResultDeny:
+    """Deliver the notification to Telegram and report the outcome to the model.
+
+    Always returns a *Deny-shaped* result on purpose: the SDK feeds
+    ``PermissionResultDeny.message`` back as the tool result, so the message
+    carries the delivery status (delivered / empty / failed), not a refusal.
+    """
     message = str(tool_input.get("message", "") or "").strip()
     if not message:
         return PermissionResultDeny(

@@ -62,6 +62,7 @@ def spoiler_tokenize(state: StateInline, silent: bool) -> bool:
 
 
 def _post_process(state: StateInline, delimiters: list[Delimiter]) -> None:
+    """Turn matched spoiler delimiter pairs into open/close tokens; fix lone markers."""
     lone_markers: list[int] = []
     maximum = len(delimiters)
 

@@ -9,6 +9,7 @@ from src.ui.sdk_views import (
 
 
 def test_format_context_usage_includes_totals() -> None:
+    """Context usage shows totals, model, and sorted non-empty categories."""
     tr = Translator("en")
     usage = {
         "totalTokens": 12345,
@@ -34,12 +35,14 @@ def test_format_context_usage_includes_totals() -> None:
 
 
 def test_format_context_usage_zero_tokens_safe() -> None:
+    """Empty usage data formats without raising."""
     tr = Translator("en")
     out = format_context_usage({}, tr)
     assert isinstance(out, str)
 
 
 def test_format_mcp_status_empty_servers() -> None:
+    """An empty server list uses the translated empty message."""
     tr = Translator("en")
     out = format_mcp_status({"mcpServers": []}, tr)
     # Empty status produces the `mcp_empty` translation, not raw key.
@@ -47,6 +50,7 @@ def test_format_mcp_status_empty_servers() -> None:
 
 
 def test_format_mcp_status_groups_by_state() -> None:
+    """MCP status groups connected servers before failed ones and shows errors."""
     tr = Translator("en")
     status = {
         "mcpServers": [
@@ -64,6 +68,7 @@ def test_format_mcp_status_groups_by_state() -> None:
 
 
 def test_format_mcp_status_unknown_status_falls_back_to_raw_name() -> None:
+    """An unknown status falls back to showing the raw status name."""
     tr = Translator("en")
     status = {"mcpServers": [{"name": "x", "status": "weird-unknown"}]}
     out = format_mcp_status(status, tr)
@@ -72,6 +77,7 @@ def test_format_mcp_status_unknown_status_falls_back_to_raw_name() -> None:
 
 
 def test_format_server_info_lists_commands() -> None:
+    """Server info lists each command with a slash prefix and the output style."""
     tr = Translator("en")
     info = {
         "commands": [{"name": "foo"}, {"name": "bar"}],
@@ -83,12 +89,14 @@ def test_format_server_info_lists_commands() -> None:
 
 
 def test_format_server_info_handles_missing_fields() -> None:
+    """Server info with missing fields falls back to defaults."""
     tr = Translator("en")
     out = format_server_info({}, tr)
     assert "default" in out
 
 
 def test_format_server_info_caps_command_list_at_30() -> None:
+    """Server info caps the listed commands at thirty."""
     tr = Translator("en")
     info = {"commands": [{"name": f"c{i}"} for i in range(50)]}
     out = format_server_info(info, tr)

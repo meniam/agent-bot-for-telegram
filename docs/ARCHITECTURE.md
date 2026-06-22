@@ -68,11 +68,15 @@ Responsibilities:
   tool status mirroring.
 - `infra/` contains agent-facing and runtime infrastructure: the pluggable
   agent backends (`agent_factory` + `claude_agent` / `codex_agent` / `pi_agent`,
-  fronted by `AgentSessionManager`), the permission gate, custom command
-  loading, logs, draft streaming, the per-chat SQLite message log
-  (`message_db`), named multi-session metadata (`session_store`), and the
-  scheduled-task subsystem (`task_*`).
-- `services/` encapsulates external APIs and filesystem-backed upload state.
+  fronted by `AgentSessionManager`) sharing a common `BaseAgentBackend`
+  (`agent_base.py`) for per-chat locks, idle GC, and session meta-ops; the
+  permission gate, custom command loading, logs, draft streaming, the per-chat
+  SQLite message log (`message_db`), named multi-session metadata
+  (`session_store`), the scheduled-task subsystem (`task_*`), the fail-closed
+  ACL builder (`access_control.py`), and runtime skill linking
+  (`skills_linker.py`).
+- `services/` encapsulates external APIs, filesystem-backed upload state, and
+  system-prompt composition (`system_prompt_builder.py`).
 
 ## 4. Process Startup and Multi-Bot Runtime
 
@@ -163,9 +167,11 @@ Config normalization:
 1. `_make_bot(cfg)` creates an aiogram `Bot` with HTML parse mode defaults.
 2. `bot.get_me()` resolves the Telegram username for logs.
 3. `_make_logs(cfg)` creates general and per-chat loggers.
-4. `Translator(cfg.lang)` and `system_prompt` are resolved.
+4. `Translator(cfg.lang)` is created and the system prompt is composed by
+   `services/system_prompt_builder.py::compose_system_prompt`.
 5. `ReactionPicker` is created from translations.
-6. `_make_acl(cfg, glog)` creates the fail-closed predicate.
+6. `infra/access_control.py::make_acl(cfg, glog)` creates the fail-closed
+   predicate.
 7. `DraftStreamer` is created.
 8. `TelegramInteractionGate` is created.
 9. `ToolStatusMirror` is created.
@@ -206,7 +212,8 @@ signatures consistent: `ctx`, `cl`, and `chat_id` come from middleware.
 
 ## 8. Access Control
 
-ACL is built in `bot._make_acl` and enforced by `ui/middleware.py`.
+ACL is built by `infra/access_control.py::make_acl` and enforced by
+`ui/middleware.py`.
 
 Fail-closed order:
 
@@ -282,8 +289,12 @@ absolute file paths to the prompt.
 
 ## 11. Agent Sessions
 
-`infra/agent.py:AgentSessionManager` owns `ClaudeSDKClient` sessions per
-Telegram chat.
+`infra/agent.py:AgentSessionManager` (an alias for `ClaudeAgentBackend`) owns
+`ClaudeSDKClient` sessions per Telegram chat. All three backends
+(Claude / Codex / PI) inherit `BaseAgentBackend` (`infra/agent_base.py`), which
+provides the per-chat lock map, the idle-GC loop, and the session meta-ops
+(`new`/`switch`/`delete`/`list`/`current_session`). The state below is the
+Claude backend's; Codex and PI keep analogous live-session maps.
 
 State:
 
@@ -328,9 +339,9 @@ Idle GC closes sessions that have been idle longer than
 
 ## 12. Reply Streaming
 
-Claude replies arrive from `ask_stream` as delta chunks. `DraftStreamer`
-accepts an async iterator of deltas, accumulates text locally, and
-periodically calls Telegram raw method `sendMessageDraft`.
+Agent replies arrive from `ask_stream` as `StreamChunk` deltas. `DraftStreamer`
+accepts an async iterator of chunks, accumulates text locally, and
+periodically calls Telegram raw method `sendRichMessageDraft`.
 
 Properties:
 

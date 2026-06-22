@@ -11,6 +11,7 @@ from src.infra.session_store import Session
 
 
 def test_for_chat_creates_logger_with_file_handler(tmp_path: Path) -> None:
+    """Verify for_chat creates a logger that writes a per-chat log file."""
     logs = BotLogs(name="bot1", base_dir=tmp_path)
     log = logs.for_chat(42)
     log.info("hello")
@@ -20,6 +21,7 @@ def test_for_chat_creates_logger_with_file_handler(tmp_path: Path) -> None:
 
 
 def test_for_chat_returns_same_logger_on_second_call(tmp_path: Path) -> None:
+    """Verify for_chat returns the cached logger on a repeat call."""
     logs = BotLogs(name="bot1", base_dir=tmp_path)
     a = logs.for_chat(1)
     b = logs.for_chat(1)
@@ -27,6 +29,7 @@ def test_for_chat_returns_same_logger_on_second_call(tmp_path: Path) -> None:
 
 
 def test_no_base_dir_returns_noop_logger() -> None:
+    """Verify a no-base-dir BotLogs returns a shared no-op logger."""
     logs = BotLogs(name="bot2", base_dir=None)
     log = logs.for_chat(1)
     # Should be silent (NullHandler) and shared across calls.
@@ -34,6 +37,7 @@ def test_no_base_dir_returns_noop_logger() -> None:
 
 
 def test_lru_evicts_oldest_when_capacity_exceeded(tmp_path: Path) -> None:
+    """Verify the LRU evicts the least recently used logger and closes its handlers."""
     logs = BotLogs(name="bot3", base_dir=tmp_path, capacity=2)
     log1 = logs.for_chat(1)
     log2 = logs.for_chat(2)
@@ -48,6 +52,7 @@ def test_lru_evicts_oldest_when_capacity_exceeded(tmp_path: Path) -> None:
 
 
 def test_general_logger_writes_bot_log(tmp_path: Path) -> None:
+    """Verify the general logger writes to bot.log."""
     logs = BotLogs(name="bot4", base_dir=tmp_path)
     logs.general.info("startup")
     for h in logs.general.handlers:
@@ -63,6 +68,7 @@ def _cleanup_loggers(prefix: str) -> None:
 
 
 def test_messages_dir_creates_db_with_session(tmp_path: Path) -> None:
+    """Verify a configured messages_dir creates a db tagged with the resolved session."""
     logs = BotLogs(
         name="mbot",
         base_dir=tmp_path / "bot",
@@ -87,6 +93,7 @@ def test_messages_dir_creates_db_with_session(tmp_path: Path) -> None:
 
 
 def test_no_messages_dir_writes_no_db(tmp_path: Path) -> None:
+    """Verify no message db is written when messages_dir is unset."""
     logs = BotLogs(name="nodb", base_dir=tmp_path / "bot")
     logs.for_chat(1).info("hi")
     assert not any(tmp_path.rglob("*.db"))
@@ -94,6 +101,7 @@ def test_no_messages_dir_writes_no_db(tmp_path: Path) -> None:
 
 
 def test_lru_eviction_closes_sqlite_connection(tmp_path: Path) -> None:
+    """Verify LRU eviction closes the evicted chat's SQLite connection."""
     logs = BotLogs(
         name="evict",
         base_dir=tmp_path / "bot",
@@ -118,6 +126,7 @@ def test_lru_eviction_closes_sqlite_connection(tmp_path: Path) -> None:
 
 
 def test_messages_dir_without_resolver_tags_null_session(tmp_path: Path) -> None:
+    """Verify messages are tagged with a null session when no resolver is set."""
     logs = BotLogs(
         name="nores",
         base_dir=tmp_path / "bot",
@@ -137,6 +146,7 @@ def test_messages_dir_without_resolver_tags_null_session(tmp_path: Path) -> None
 
 
 def test_resolver_returning_none_writes_null_session(tmp_path: Path) -> None:
+    """Verify a resolver returning None writes a null session id."""
     logs = BotLogs(
         name="nullres",
         base_dir=tmp_path / "bot",
@@ -154,7 +164,7 @@ def test_resolver_returning_none_writes_null_session(tmp_path: Path) -> None:
 
 
 def test_resolver_receives_per_chat_id(tmp_path: Path) -> None:
-    """Each chat's handler must resolve its own id, not a shared captured one."""
+    """Verify each chat's handler resolves its own id, not a shared captured one."""
     logs = BotLogs(
         name="percid",
         base_dir=tmp_path / "bot",
@@ -175,7 +185,10 @@ def test_resolver_receives_per_chat_id(tmp_path: Path) -> None:
 
 
 def test_no_base_dir_skips_db_even_with_messages_dir(tmp_path: Path) -> None:
-    """base_dir=None short-circuits to NOOP — messages_dir alone writes nothing."""
+    """Verify base_dir=None short-circuits so messages_dir alone writes nothing.
+
+    base_dir=None forces NOOP mode regardless of messages_dir.
+    """
     logs = BotLogs(name="nobase", base_dir=None, messages_dir=tmp_path / "messages")
     logs.for_chat(1).info("hi")
     assert not (tmp_path / "messages").exists()
@@ -183,6 +196,7 @@ def test_no_base_dir_skips_db_even_with_messages_dir(tmp_path: Path) -> None:
 
 
 def test_eviction_closes_file_handler_too(tmp_path: Path) -> None:
+    """Verify eviction also closes the evicted chat's rotating file handler."""
     logs = BotLogs(name="evictfile", base_dir=tmp_path / "bot", capacity=1)
     log1 = logs.for_chat(1)
     file_handlers = [
@@ -198,6 +212,7 @@ def test_eviction_closes_file_handler_too(tmp_path: Path) -> None:
 
 
 def test_evicted_chat_reopens_as_fresh_logger(tmp_path: Path) -> None:
+    """Verify an evicted chat reopens as a brand-new, freshly wired logger."""
     logs = BotLogs(
         name="reopen",
         base_dir=tmp_path / "bot",
@@ -214,6 +229,7 @@ def test_evicted_chat_reopens_as_fresh_logger(tmp_path: Path) -> None:
 
 
 def test_general_logger_no_base_dir_has_no_file_handler() -> None:
+    """Verify the general logger has no file handler without a base dir."""
     logs = BotLogs(name="gennobase", base_dir=None)
     assert not any(
         isinstance(h, logging.handlers.RotatingFileHandler)
@@ -223,4 +239,5 @@ def test_general_logger_no_base_dir_has_no_file_handler() -> None:
 
 
 def test_module_cleanup_after_run() -> None:
+    """Remove all loggers created by this module after the run."""
     _cleanup_loggers("bot.")

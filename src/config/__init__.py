@@ -129,6 +129,8 @@ PROVIDER_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
 
 
 class BotConfig(BaseModel):
+    """Validated, frozen settings for a single bot loaded from the config file."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str  # internal name taken from the key in the config file
@@ -203,6 +205,7 @@ class BotConfig(BaseModel):
     @field_validator("lang", mode="before")
     @classmethod
     def _lang_lower(cls, v: object) -> object:
+        """Normalize the ``lang`` value to lowercase before validation."""
         return str(v).lower() if v is not None else v
 
 
@@ -215,10 +218,18 @@ def is_admin(cfg: BotConfig, chat_id: int) -> bool:
 
 
 def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested config sections into the flat field names ``BotConfig`` expects.
+
+    Top-level scalars pass through; recognized object sections (``gateway``,
+    ``agent``, ``providers.*``, and other ``NESTED_CONFIG_SECTIONS``) have their
+    keys remapped to flat targets. Unknown sections/keys and fields set both
+    directly and via a section raise ``ValueError``.
+    """
     flat: dict[str, Any] = {}
     nested: dict[str, dict[str, Any]] = {}
 
     def set_field(target: str, value: Any, source: str) -> None:
+        """Store ``value`` under ``target``, rejecting a duplicate flat key."""
         if target in flat:
             raise ValueError(
                 f"[{name}] config field {target} is set both directly and in section {source}"
@@ -228,6 +239,7 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
     def flatten_section(
         source: str, values: dict[str, Any], section_map: dict[str, str]
     ) -> None:
+        """Remap a section's keys onto flat targets via ``section_map``."""
         for nested_key, nested_value in values.items():
             target = section_map.get(nested_key)
             if target is None:
@@ -298,8 +310,11 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_path(raw: str, base_dir: Path) -> Path:
-    """Expand ``~`` and anchor relative paths to the config file's directory
-    (not the process CWD), then resolve to an absolute path."""
+    """Resolve ``raw`` to an absolute path.
+
+    Expand ``~`` and anchor relative paths to the config file's directory (not
+    the process CWD), then resolve.
+    """
     p = Path(raw).expanduser()
     if not p.is_absolute():
         p = base_dir / p
@@ -307,6 +322,12 @@ def _resolve_path(raw: str, base_dir: Path) -> Path:
 
 
 def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
+    """Build a validated ``BotConfig`` from one bot's raw config data.
+
+    Flatten nested sections, resolve and create directory paths relative to
+    ``base_dir``, fall back to environment variables for the bot token and Groq
+    key, coerce chat-id and tool lists, then validate the assembled payload.
+    """
     data = _flatten_nested_sections(name, data)
 
     raw_token = data.get("telegram_bot_token") or os.environ.get(
@@ -384,6 +405,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         )
 
     def _parse_chat_id_list(field: str) -> tuple[int, ...]:
+        """Coerce a config list field into a tuple of integer chat IDs."""
         raw = data.get(field)
         if raw is None:
             return ()
@@ -458,6 +480,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
 
 
 def _default_config_path() -> Path:
+    """Return the first existing default config path, else ``CONFIG_YAML_PATH``."""
     for path in DEFAULT_CONFIG_PATHS:
         if path.exists():
             return path
@@ -465,6 +488,7 @@ def _default_config_path() -> Path:
 
 
 def _read_config_data(path: Path) -> dict[str, Any]:
+    """Load a YAML or JSON config file into a dict, rejecting other formats."""
     if path.suffix in {".yaml", ".yml"}:
         with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -480,6 +504,11 @@ def _read_config_data(path: Path) -> dict[str, Any]:
 
 
 def load(path: Path | str | None = None) -> dict[str, BotConfig]:
+    """Load and validate every bot config from ``path`` (or the default file).
+
+    Returns a ``{name: BotConfig}`` dict. Accepts both the multi-bot mapping
+    format and the flat single-bot format (wrapped under the name "default").
+    """
     p = Path(path) if path is not None else _default_config_path()
     if not p.exists():
         raise FileNotFoundError(

@@ -35,6 +35,14 @@ async def handle(
     chat_id: int,
     tool_input: dict[str, Any],
 ) -> PermissionResultDeny:
+    """Ask each question in turn and return the answers as a text summary.
+
+    Renders one keyboard per question via `_ask_one`, collecting answers
+    sequentially. If the user sends a new message mid-flow (`cancel_active_aq`
+    sets the abort flag), remaining questions are recorded as skipped. Always
+    returns a Deny-shaped result whose message *is* the answer summary — the SDK
+    feeds it back to the model as the tool result. Timeout → "no response".
+    """
     t = gate._t
     questions = tool_input.get("questions") or []
     if not isinstance(questions, list) or not questions:
@@ -96,6 +104,13 @@ async def _ask_one(
     qtotal: int,
     question: dict[str, Any],
 ) -> list[str] | None:
+    """Render one question's keyboard and await the pick.
+
+    Registers an `_AQSession` in ``gate._aq`` keyed by a token embedded in
+    callback_data; `on_callback` mutates its selection and resolves the future.
+    Returns the chosen labels, or None for Skip/abort. Raises `TimeoutError`
+    when the user does not answer within ``gate._timeout``.
+    """
     from .gate import _AQSession
 
     t = gate._t
@@ -123,6 +138,7 @@ async def _ask_one(
     # callback so the checkmarks redraw without keeping state in the
     # closure.
     def build_kb() -> InlineKeyboardMarkup:
+        """Build the options keyboard, redrawing checkmarks from current selection."""
         session = gate._aq.get(request_id)
         selected: set[int] = session.selected if session is not None else set()
         rows: list[list[InlineKeyboardButton]] = []
@@ -187,6 +203,12 @@ async def _ask_one(
 async def on_callback(
     gate: TelegramInteractionGate, callback: CallbackQuery
 ) -> None:
+    """Handle an `aq:` tap and advance the question's selection state.
+
+    An option tap toggles (multi-select, redrawing the keyboard) or resolves
+    (single-select); Done resolves with the current selection; Skip resolves
+    with None. No-op for stale or cross-chat callbacks.
+    """
     t = gate._t
     data = callback.data or ""
     if not data.startswith("aq:"):
@@ -275,6 +297,11 @@ async def on_callback(
 def _format_answers(
     collected: list[tuple[str, list[str] | None]],
 ) -> str:
+    """Format collected answers as the text summary returned to the model.
+
+    ``None`` answers render as skipped, an empty list as no selection, and a
+    non-empty list as the chosen labels.
+    """
     lines = ["User responded to AskUserQuestion via Telegram inline buttons:"]
     for i, (q, answers) in enumerate(collected, 1):
         lines.append("")

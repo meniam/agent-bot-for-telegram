@@ -58,6 +58,7 @@ select = [
     "RET",           # explicit returns
     "ARG",           # unused arguments
     "TC",            # typing import hygiene
+    "D",             # pydocstyle — full docstring coverage
 ]
 ignore = [
     "S101",    # assert is fine for internal invariants
@@ -67,6 +68,9 @@ ignore = [
     "TC006",   # cast() quoted-string style is optional
     "RET504",  # explicit assign-then-return is sometimes clearer
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
 
 [tool.ruff.lint.per-file-ignores]
 "src/i18n/*.json" = ["ALL"]

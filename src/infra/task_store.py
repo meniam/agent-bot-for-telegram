@@ -39,11 +39,12 @@ _GLOBAL_STEM = "global"
 
 
 def _now_iso() -> str:
+    """Return the current local time as an ISO-8601 string."""
     return datetime.now().astimezone().isoformat()
 
 
 def new_task_id() -> str:
-    """A fresh 12-hex task id (also a filesystem path component)."""
+    """Mint a fresh 12-hex task id (also a filesystem path component)."""
     return secrets.token_hex(6)
 
 
@@ -51,6 +52,7 @@ class TaskStore:
     """JSON-per-chat persistence for scheduled tasks and their run history."""
 
     def __init__(self, base_dir: Path, *, history_limit: int = 100) -> None:
+        """Store tasks under ``base_dir``, keeping at most ``history_limit`` runs per task."""
         self._base = base_dir
         self._history_limit = history_limit
         self._lock = asyncio.Lock()
@@ -60,17 +62,21 @@ class TaskStore:
     # ----- paths -----------------------------------------------------------
 
     def _scope_path(self, task: Task) -> Path:
+        """Return the definition file a task belongs in (global vs. per-owner)."""
         if task.scope == "global":
             return self._base / f"{_GLOBAL_STEM}.json"
         return self._base / f"{task.owner_chat_id}.json"
 
     def _user_path(self, chat_id: int) -> Path:
+        """Return a chat's user-task definition file path."""
         return self._base / f"{chat_id}.json"
 
     def _global_path(self) -> Path:
+        """Return the global-task definition file path."""
         return self._base / f"{_GLOBAL_STEM}.json"
 
     def _history_dir(self, task_id: str) -> Path:
+        """Return a task's history directory; reject ids unsafe as path parts."""
         if not _TASK_ID_RE.match(task_id):
             raise ValueError(f"unsafe task id: {task_id!r}")
         return self._base / "history" / task_id
@@ -79,15 +85,18 @@ class TaskStore:
 
     @staticmethod
     def _secure_dir(path: Path) -> None:
+        """Best-effort restrict a directory to owner-only (0700)."""
         with contextlib.suppress(OSError, NotImplementedError):
             path.chmod(0o700)
 
     @staticmethod
     def _secure_file(path: Path) -> None:
+        """Best-effort restrict a file to owner-only (0600)."""
         with contextlib.suppress(OSError, NotImplementedError):
             path.chmod(0o600)
 
     def _atomic_write(self, path: Path, data: dict[str, Any]) -> None:
+        """Write ``data`` as JSON atomically and durably (temp, fsync, replace)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".tasks_")
         try:
@@ -114,6 +123,11 @@ class TaskStore:
             log.exception("task store: failed to quarantine %s", path)
 
     def _read_file(self, path: Path) -> list[Task]:
+        """Parse a definition file into tasks; quarantine it if unreadable.
+
+        A missing file yields ``[]``. Unparsable or malformed files are moved
+        aside; individual invalid task entries are logged and skipped.
+        """
         if not path.exists():
             return []
         try:
@@ -134,6 +148,7 @@ class TaskStore:
         return tasks
 
     def _write_file(self, path: Path, tasks: list[Task]) -> None:
+        """Atomically write a definition file holding ``tasks``."""
         payload = {
             "updated_at": _now_iso(),
             "tasks": [t.model_dump(mode="json") for t in tasks],
@@ -141,6 +156,7 @@ class TaskStore:
         self._atomic_write(path, payload)
 
     def _all_files(self) -> list[Path]:
+        """Return all top-level definition files (sorted; excludes subdirs)."""
         return sorted(
             p
             for p in self._base.glob("*.json")
@@ -150,9 +166,11 @@ class TaskStore:
     # ----- reads (no lock; atomic replace guarantees whole files) ----------
 
     def list_all(self, chat_id: int, *, include_global: bool = False) -> list[Task]:
-        """A chat's own user tasks; admins may also fold in global tasks.
+        """List a chat's own user tasks, newest first (by ``created_at``).
 
-        Newest first (by ``created_at``)."""
+        When ``include_global`` is set, global tasks are folded in as well (for
+        admin callers).
+        """
         tasks = self._read_file(self._user_path(chat_id))
         if include_global:
             tasks += self._read_file(self._global_path())
@@ -160,6 +178,7 @@ class TaskStore:
         return tasks
 
     def list_global(self) -> list[Task]:
+        """List all global tasks, newest first (by ``created_at``)."""
         tasks = self._read_file(self._global_path())
         tasks.sort(key=lambda t: t.created_at, reverse=True)
         return tasks
@@ -176,6 +195,7 @@ class TaskStore:
         return due
 
     def get(self, task_id: str) -> Task | None:
+        """Find a task by id across all scope files, or None if absent."""
         for path in self._all_files():
             for task in self._read_file(path):
                 if task.id == task_id:
@@ -185,6 +205,11 @@ class TaskStore:
     # ----- mutations (serialized) ------------------------------------------
 
     async def add(self, task: Task) -> Task:
+        """Persist a new task (assigning an id if needed) into its scope file.
+
+        Validates any caller-supplied id and inserts the task newest-first under
+        the store lock. Returns the stored task.
+        """
         if not task.id:
             task = task.model_copy(update={"id": new_task_id()})
         elif not _TASK_ID_RE.match(task.id):
@@ -213,6 +238,7 @@ class TaskStore:
         return task
 
     async def remove(self, task: Task) -> bool:
+        """Delete a task and its history; return False if it was not present."""
         async with self._lock:
             path = self._scope_path(task)
             tasks = self._read_file(path)
@@ -227,6 +253,7 @@ class TaskStore:
     # ----- history ---------------------------------------------------------
 
     async def append_history(self, run: TaskRun) -> None:
+        """Append one run record to a task's history and prune to the limit."""
         async with self._lock:
             hdir = self._history_dir(run.task_id)
             hdir.mkdir(parents=True, exist_ok=True)
@@ -236,12 +263,14 @@ class TaskStore:
             self._prune_history(hdir)
 
     def _prune_history(self, hdir: Path) -> None:
+        """Delete the oldest history records beyond ``history_limit``."""
         records = sorted(hdir.glob("*.json"))
         excess = len(records) - self._history_limit
         for path in records[:excess]:
             path.unlink(missing_ok=True)
 
     def list_history(self, task_id: str) -> list[TaskRun]:
+        """Return a task's run records oldest-first; invalid records are skipped."""
         hdir = self._history_dir(task_id)
         if not hdir.exists():
             return []
@@ -255,6 +284,7 @@ class TaskStore:
         return runs
 
     def _remove_history(self, task_id: str) -> None:
+        """Delete a task's entire history directory (no-op if absent/unsafe)."""
         try:
             hdir = self._history_dir(task_id)
         except ValueError:

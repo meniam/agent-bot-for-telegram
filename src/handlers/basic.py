@@ -1,6 +1,7 @@
-"""Static-command handlers that don't drive an agent turn directly:
-`/start`, `/new`, `/cancel`, `/context`, `/stop`, `/mcp`, `/info`, `/whoami`,
-`/help`.
+"""Static-command handlers that don't drive an agent turn directly.
+
+Covers `/start`, `/new`, `/cancel`, `/context`, `/stop`, `/mcp`, `/info`,
+`/whoami`, and `/help`.
 """
 
 import logging
@@ -34,12 +35,14 @@ _HELP_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 async def start(message: Message, ctx: BotContext, **_: object) -> None:
+    """Reply to `/start` with the greeting message."""
     await send_md(message, ctx.tr.t("start_greeting"))
 
 
 async def new_session(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Start a fresh agent session and clear any armed plan / pending question."""
     session = await ctx.agent.new_session(message.chat.id)
     ctx.plan_router.disarm(message.chat.id)
     await ctx.gate.cancel_active_aq(message.chat.id)
@@ -50,6 +53,7 @@ async def new_session(
 async def cancel_pending(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Clear an armed `/plan` prompt, or report there is nothing to cancel."""
     if ctx.plan_router.is_armed(message.chat.id):
         ctx.plan_router.disarm(message.chat.id)
         cl.info("/cancel: pending plan input cleared")
@@ -61,6 +65,7 @@ async def cancel_pending(
 async def show_context(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Report the session's context-window usage for `/context`."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
@@ -93,6 +98,7 @@ async def show_context(
 async def stop_query(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Interrupt the running agent turn for `/stop`."""
     try:
         interrupted = await ctx.agent.interrupt(message.chat.id)
     except Exception as e:
@@ -110,6 +116,7 @@ async def stop_query(
 async def show_mcp(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Report connected MCP servers for `/mcp`."""
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
         status = await ctx.agent.get_mcp_status(message.chat.id)
@@ -126,6 +133,7 @@ async def show_mcp(
 async def show_info(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Report agent/server info for `/info`."""
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
         info = await ctx.agent.get_server_info(message.chat.id)
@@ -143,6 +151,7 @@ async def show_info(
 
 
 async def whoami(message: Message, ctx: BotContext, **_: object) -> None:
+    """Report the sender's chat/user identity, access, mode, and session."""
     chat_id = message.chat.id
     if ctx.cfg.allowed_for_all:
         access = ctx.tr.t("whoami_access_open")
@@ -187,6 +196,7 @@ async def whoami(message: Message, ctx: BotContext, **_: object) -> None:
 
 
 def _help_item(ctx: BotContext, bc: BotCommand) -> str:
+    """Format one `/help` line, appending a usage example when one exists."""
     line = f"**/{bc.command}** — {bc.description}"
     if bc.command in _HELP_EXAMPLES:
         key = f"help_example_{bc.command}"
@@ -197,6 +207,7 @@ def _help_item(ctx: BotContext, bc: BotCommand) -> str:
 
 
 async def show_help(message: Message, ctx: BotContext, **_: object) -> None:
+    """Render the grouped command reference for `/help`."""
     # Inline-bold headers + single-newline item lines keep the layout compact:
     # `##`/`-` would render as block elements (h2/ul/li) whose Rich Message
     # margins stack into large vertical gaps.
@@ -219,6 +230,7 @@ async def show_help(message: Message, ctx: BotContext, **_: object) -> None:
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the static-command handlers on ``dp``."""
     dp.message.register(start, CommandStart())
     dp.message.register(new_session, Command("new"))
     dp.message.register(cancel_pending, Command("cancel"))

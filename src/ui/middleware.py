@@ -21,6 +21,7 @@ _GATE_CALLBACK_PREFIXES = ("perm:", "aq:", "plan:")
 
 
 async def deny_access(message: Message, ctx: BotContext) -> None:
+    """Log the rejection and tell the chat it is not on the allowlist."""
     ctx.bot_logs.for_chat(message.chat.id).warning(
         "access denied for chat_id=%s user=%s",
         message.chat.id,
@@ -30,6 +31,7 @@ async def deny_access(message: Message, ctx: BotContext) -> None:
 
 
 def _chat_id_of(event: TelegramObject) -> int | None:
+    """Extract the chat id from a message or callback event, else None."""
     if isinstance(event, Message):
         return event.chat.id
     if isinstance(event, CallbackQuery):
@@ -40,7 +42,10 @@ def _chat_id_of(event: TelegramObject) -> int | None:
 
 
 class AclMiddleware(BaseMiddleware):
+    """Allowlist gate run once per inbound message/callback."""
+
     def __init__(self, ctx: BotContext) -> None:
+        """Store the bot context shared with every handler invocation."""
         self._ctx = ctx
 
     async def __call__(
@@ -49,6 +54,7 @@ class AclMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
+        """Inject ctx/chat_id/cl, enforce the allowlist, then call the handler."""
         data["ctx"] = self._ctx
         chat_id = _chat_id_of(event)
         if chat_id is None:

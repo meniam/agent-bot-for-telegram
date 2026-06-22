@@ -1,7 +1,10 @@
-"""Markdown → Telegram HTML conversion, chunked send, audio filename.
+"""Markdown → Telegram HTML conversion plus chunked Rich-Message senders.
 
-Pure helpers — no I/O state, no closures over per-bot config. Reusable
-across bots.
+Two layers live here. The converters (`to_html`, `to_rich_html`, `format_quote`,
+`audio_filename`) are pure — no I/O, no closures over per-bot config, reusable
+across bots. On top sits a thin send layer (`send_md`, `send_md_to_chat`) that
+chunks the converted HTML to the Telegram limit and falls back to plain text on
+a parse error. The senders do aiogram I/O; everything else does not.
 """
 
 import html
@@ -85,8 +88,11 @@ def _passthrough_safe_tags(raw: str) -> str:
 
 
 def _media_block(node: SyntaxTreeNode) -> str | None:
-    """Render an image node as a Telegram media block, or None if it is not a
-    standalone HTTP(S) media URL we can map to img/video/audio."""
+    """Render an image node as a Telegram media block.
+
+    Returns None unless the node is a standalone HTTP(S) media URL that maps to
+    an img/video/audio extension.
+    """
     src = str(node.attrGet("src") or "")
     scheme = urlsplit(src).scheme.lower()
     if scheme not in ("http", "https"):
@@ -118,6 +124,7 @@ def _cell_align(node: SyntaxTreeNode) -> str:
 
 
 def _render(node: SyntaxTreeNode) -> str:
+    """Recursively render a markdown-it syntax-tree node to Telegram HTML."""
     t = node.type
     ch = node.children or []
 
@@ -308,6 +315,7 @@ _FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:\n[ \t]*\1[ \t]*$|\Z)",
 
 
 def _escape_faux_quotes(text: str) -> str:
+    r"""Backslash-escape line-leading `>` comparisons outside fenced code."""
     out: list[str] = []
     pos = 0
     for m in _FENCE_RE.finditer(text):
@@ -319,6 +327,7 @@ def _escape_faux_quotes(text: str) -> str:
 
 
 def to_html(text: str) -> str:
+    """Convert Markdown to Telegram HTML (newlines kept literal)."""
     tokens = _md.parse(_escape_faux_quotes(text))
     tree = SyntaxTreeNode(tokens)
     return _render(tree)
@@ -354,7 +363,7 @@ def _breaks(seg: str) -> str:
 
 
 def to_rich_html(text: str) -> str:
-    """`to_html` adapted for sendRichMessage: line breaks become `<br>`.
+    r"""`to_html` adapted for sendRichMessage: line breaks become `<br>`.
 
     Unlike classic `parse_mode=HTML` (where `\\n` is a newline), Rich Message
     HTML is rendered as a document — bare newlines turn into spaces. Soft/hard
@@ -384,7 +393,7 @@ def to_rich_html(text: str) -> str:
 
 
 async def send_md(message: Message, text: str) -> None:
-    """Sends Markdown as Telegram Rich Message HTML in chunks of ≤ TG_LIMIT.
+    """Send Markdown as Telegram Rich Message HTML in chunks of ≤ TG_LIMIT.
 
     Falls back to plain text for any chunk that the parser rejects.
     """
@@ -395,10 +404,11 @@ async def send_md(message: Message, text: str) -> None:
 
 
 async def send_md_to_chat(bot: Bot, chat_id: int, text: str) -> None:
-    """Chat-id-bound twin of `send_md` — used for bot-initiated messages
-    (hooks, notifications) that have no inbound `Message` to reply to.
+    """Chat-id-bound twin of `send_md`.
 
-    Tries sendRichMessage with HTML first; on parse failure falls back to
+    Used for bot-initiated messages (hooks, notifications) that have no inbound
+    `Message` to reply to. Tries sendRichMessage with HTML first; on parse
+    failure falls back to
     plain text so the user never sees raw escape artifacts.
     """
     converted = to_rich_html(text)

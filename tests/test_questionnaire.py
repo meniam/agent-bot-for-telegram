@@ -1,7 +1,10 @@
+"""Questionnaire parsing: fenced and raw JSON payloads, validation."""
+
 from src.ui.questionnaire import parse_questionnaire
 
 
 def test_parse_fenced_questionnaire() -> None:
+    """A fenced questionnaire block parses into questions."""
     payload = """```bot_questionnaire
 {
   "type": "questionnaire",
@@ -29,6 +32,7 @@ def test_parse_fenced_questionnaire() -> None:
 
 
 def test_parse_raw_json_questionnaire() -> None:
+    """A raw JSON questionnaire parses into questions."""
     payload = """
 {
   "type": "questionnaire",
@@ -49,10 +53,12 @@ def test_parse_raw_json_questionnaire() -> None:
 
 
 def test_parse_ignores_normal_text() -> None:
+    """Plain text is not parsed as a questionnaire."""
     assert parse_questionnaire("1. What is PHP?\n2. What is Composer?") is None
 
 
 def test_parse_rejects_text_question_with_options() -> None:
+    """A text question carrying options is rejected."""
     payload = """
 {
   "type": "questionnaire",

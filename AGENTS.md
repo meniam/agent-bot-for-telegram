@@ -310,6 +310,16 @@ Validate those manually when touched.
 
 - Preserve fail-closed access control.
 - Keep `bot.py` as wiring and supervision only.
+- Docstrings (English): **every** symbol is documented — module, class,
+  function, method, `__init__`, magic method, and private `_` / nested helpers.
+  ruff's `D` (pydocstyle, `pep257` convention) enforces this for public symbols
+  and modules; private/nested ones are not linter-gated but are still required
+  (keep them to one honest imperative line). Style: imperative summary ("Build…"
+  not "Builds…"), a blank line after a multi-line summary, ends with a period.
+  Explain *why* for non-obvious control flow (locks, GC, grace windows,
+  Deny-shaped tool results); for trivial symbols a single accurate line is
+  enough — never restate the signature as filler. If a docstring and the code
+  disagree, fix the docstring (the code wins).
 - Keep feature logic in focused `handlers/`, `ui/`, `infra/`, or `services/`
   modules.
 - Add or update focused tests when behavior changes.

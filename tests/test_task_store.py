@@ -19,6 +19,7 @@ def _task(
     next_run_at: datetime | None = None,
     enabled: bool = True,
 ) -> Task:
+    """Build a task with the given owner, scope, and schedule."""
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
@@ -32,6 +33,7 @@ def _task(
 
 
 async def test_add_and_reload(tmp_path: Path) -> None:
+    """An added task is readable from a fresh store reading the same dir."""
     store = TaskStore(tmp_path)
     t = await store.add(_task(chat_id=10, next_run_at=NOW))
     # Fresh store reads from disk, no in-memory cache.
@@ -41,6 +43,7 @@ async def test_add_and_reload(tmp_path: Path) -> None:
 
 
 async def test_list_due_spans_user_and_global(tmp_path: Path) -> None:
+    """Listing due tasks spans users and global, excluding future and paused."""
     store = TaskStore(tmp_path)
     past = NOW - timedelta(minutes=1)
     future = NOW + timedelta(hours=1)
@@ -55,6 +58,7 @@ async def test_list_due_spans_user_and_global(tmp_path: Path) -> None:
 
 
 async def test_list_all_isolates_users(tmp_path: Path) -> None:
+    """Listing a user's tasks isolates them but can include global tasks."""
     store = TaskStore(tmp_path)
     await store.add(_task(chat_id=10, next_run_at=NOW))
     await store.add(_task(chat_id=20, next_run_at=NOW))
@@ -69,6 +73,7 @@ async def test_list_all_isolates_users(tmp_path: Path) -> None:
 
 
 async def test_remove(tmp_path: Path) -> None:
+    """Removing a task succeeds once and then reports not found."""
     store = TaskStore(tmp_path)
     t = await store.add(_task(chat_id=10, next_run_at=NOW))
     assert await store.remove(t) is True
@@ -77,6 +82,7 @@ async def test_remove(tmp_path: Path) -> None:
 
 
 async def test_corrupt_file_is_quarantined(tmp_path: Path) -> None:
+    """A corrupt task file is quarantined and excluded from listings."""
     store = TaskStore(tmp_path)
     bad = tmp_path / "10.json"
     bad.write_text("{ this is not json", encoding="utf-8")
@@ -87,6 +93,7 @@ async def test_corrupt_file_is_quarantined(tmp_path: Path) -> None:
 
 
 async def test_history_append_and_prune(tmp_path: Path) -> None:
+    """Appending history beyond the limit prunes the oldest runs."""
     store = TaskStore(tmp_path, history_limit=2)
     tid = new_task_id()
     for i in range(3):
@@ -107,6 +114,7 @@ async def test_history_append_and_prune(tmp_path: Path) -> None:
 
 
 async def test_unsafe_task_id_rejected(tmp_path: Path) -> None:
+    """An unsafe task id is rejected on history lookup and on add."""
     store = TaskStore(tmp_path)
     with pytest.raises(ValueError):
         store.list_history("../escape")
@@ -115,6 +123,7 @@ async def test_unsafe_task_id_rejected(tmp_path: Path) -> None:
 
 
 def _bad_id_task() -> Task:
+    """Build a task with a path-traversal id for rejection tests."""
     return Task(
         id="../escape",
         owner_chat_id=1,

@@ -35,6 +35,10 @@ def create_agent_backend(
     codex_factory: Callable[[], Any] | None = None,
     pi_transport_factory: Callable[[str | None], Any] | None = None,
 ) -> AgentBackend:
+    """Build the agent backend selected by ``cfg.agent_provider``.
+
+    Raises ``ValueError`` for an unsupported provider.
+    """
     if cfg.agent_provider == "claude":
         return ClaudeAgentBackend(
             session_store=session_store,

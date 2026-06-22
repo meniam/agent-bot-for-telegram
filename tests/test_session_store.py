@@ -1,3 +1,5 @@
+"""SessionStore: per-chat SQLite session CRUD, ordering, and persistence."""
+
 import logging
 import sqlite3
 from pathlib import Path
@@ -7,10 +9,12 @@ from src.infra.session_store import SessionStore
 
 
 def _store(tmp_path: Path) -> SessionStore:
+    """Build a SessionStore rooted at a temp directory."""
     return SessionStore(tmp_path / "sessions", default_title="Новая сессия")
 
 
 def test_create_sets_current_and_default_title(tmp_path: Path) -> None:
+    """Verify create sets the new session as current with the default title."""
     store = _store(tmp_path)
     s = store.create(42)
     assert s.title == "Новая сессия"
@@ -20,6 +24,7 @@ def test_create_sets_current_and_default_title(tmp_path: Path) -> None:
 
 
 def test_unknown_chat_is_empty(tmp_path: Path) -> None:
+    """Verify an unknown chat has no current session and no sessions."""
     store = _store(tmp_path)
     assert store.current_id(7) is None
     assert store.all_sessions(7) == []
@@ -27,6 +32,7 @@ def test_unknown_chat_is_empty(tmp_path: Path) -> None:
 
 
 def test_ordinal_is_creation_order(tmp_path: Path) -> None:
+    """Verify ordinals address sessions in creation order."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)
@@ -39,6 +45,7 @@ def test_ordinal_is_creation_order(tmp_path: Path) -> None:
 
 
 def test_set_current_via_switch(tmp_path: Path) -> None:
+    """Verify set_current switches the active session."""
     store = _store(tmp_path)
     first = store.create(1)
     store.create(1)  # second becomes current
@@ -49,6 +56,7 @@ def test_set_current_via_switch(tmp_path: Path) -> None:
 
 
 def test_set_title_marks_auto_titled(tmp_path: Path) -> None:
+    """Verify set_title updates the title and marks it auto-titled."""
     store = _store(tmp_path)
     s = store.create(9)
     store.set_title(9, s.id, "Рефакторинг стриминга")
@@ -59,6 +67,7 @@ def test_set_title_marks_auto_titled(tmp_path: Path) -> None:
 
 
 def test_delete_non_current_keeps_current(tmp_path: Path) -> None:
+    """Verify deleting a non-current session leaves the current pointer intact."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)  # current
@@ -68,6 +77,7 @@ def test_delete_non_current_keeps_current(tmp_path: Path) -> None:
 
 
 def test_delete_current_repoints_to_latest_remaining(tmp_path: Path) -> None:
+    """Verify deleting the current session repoints to the latest remaining one."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)
@@ -80,6 +90,7 @@ def test_delete_current_repoints_to_latest_remaining(tmp_path: Path) -> None:
 
 
 def test_delete_last_session_clears_current(tmp_path: Path) -> None:
+    """Verify deleting the only session clears the current pointer."""
     store = _store(tmp_path)
     only = store.create(1)
     new_current = store.delete(1, only.id)
@@ -89,6 +100,7 @@ def test_delete_last_session_clears_current(tmp_path: Path) -> None:
 
 
 def test_round_trip_persists_to_disk(tmp_path: Path) -> None:
+    """Verify sessions persist so a fresh store sees the same state."""
     store = _store(tmp_path)
     s = store.create(100)
     # A fresh store over the same dir sees the persisted state.
@@ -98,6 +110,7 @@ def test_round_trip_persists_to_disk(tmp_path: Path) -> None:
 
 
 def test_corrupt_db_reads_degrade_gracefully(tmp_path: Path) -> None:
+    """Verify reads from a corrupt database degrade to empty results."""
     store = _store(tmp_path)
     path = tmp_path / "sessions" / "5.db"
     path.write_bytes(b"not a sqlite database")
@@ -109,13 +122,14 @@ def test_corrupt_db_reads_degrade_gracefully(tmp_path: Path) -> None:
 
 
 def test_create_mints_distinct_ids(tmp_path: Path) -> None:
+    """Verify create mints distinct session ids with no collisions."""
     store = _store(tmp_path)
     ids = {store.create(1).id for _ in range(5)}
     assert len(ids) == 5  # uuid4, no collisions
 
 
 def test_set_current_to_unknown_id_dangles(tmp_path: Path) -> None:
-    """Pointer can be set to a non-existent id; current() must not invent a row."""
+    """Verify a dangling current pointer resolves to no session."""
     store = _store(tmp_path)
     store.create(1)
     store.set_current(1, "ghost-id")
@@ -124,6 +138,7 @@ def test_set_current_to_unknown_id_dangles(tmp_path: Path) -> None:
 
 
 def test_set_title_on_non_current_does_not_move_current(tmp_path: Path) -> None:
+    """Verify titling a non-current session does not move the current pointer."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)  # current
@@ -136,6 +151,7 @@ def test_set_title_on_non_current_does_not_move_current(tmp_path: Path) -> None:
 
 
 def test_touch_reorders_recency_not_creation(tmp_path: Path) -> None:
+    """Verify touch reorders recency listing without affecting creation order."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)
@@ -147,6 +163,7 @@ def test_touch_reorders_recency_not_creation(tmp_path: Path) -> None:
 
 
 def test_get_by_id_unknown_returns_none(tmp_path: Path) -> None:
+    """Verify get_by_id returns None for unknown session or chat ids."""
     store = _store(tmp_path)
     store.create(1)
     assert store.get_by_id(1, "nope") is None
@@ -154,6 +171,7 @@ def test_get_by_id_unknown_returns_none(tmp_path: Path) -> None:
 
 
 def test_delete_unknown_sid_is_noop(tmp_path: Path) -> None:
+    """Verify deleting an unknown session id is a no-op."""
     store = _store(tmp_path)
     a = store.create(1)
     b = store.create(1)  # current
@@ -163,6 +181,7 @@ def test_delete_unknown_sid_is_noop(tmp_path: Path) -> None:
 
 
 def test_ordinals_shift_after_delete(tmp_path: Path) -> None:
+    """Verify ordinals renumber over remaining sessions after a delete."""
     store = _store(tmp_path)
     first = store.create(1)
     second = store.create(1)
@@ -177,6 +196,7 @@ def test_ordinals_shift_after_delete(tmp_path: Path) -> None:
 
 
 def test_null_title_row_reads_as_empty_string(tmp_path: Path) -> None:
+    """Verify a NULL title in the database reads back as an empty string."""
     store = _store(tmp_path)
     s = store.create(1)
     path = tmp_path / "sessions" / "1.db"
@@ -190,6 +210,7 @@ def test_null_title_row_reads_as_empty_string(tmp_path: Path) -> None:
 
 
 def test_set_title_and_touch_survive_reopen(tmp_path: Path) -> None:
+    """Verify title and touch state persist across a store reopen."""
     store = _store(tmp_path)
     s = store.create(1)
     store.set_title(1, s.id, "Закреплённое")
@@ -203,7 +224,7 @@ def test_set_title_and_touch_survive_reopen(tmp_path: Path) -> None:
 
 
 def test_negative_group_chat_id_round_trips(tmp_path: Path) -> None:
-    """Telegram group ids are negative; the db filename must handle them safely."""
+    """Verify negative group chat ids round-trip without filename collisions."""
     store = _store(tmp_path)
     gid = -1001234567890
     s = store.create(gid)
@@ -215,7 +236,7 @@ def test_negative_group_chat_id_round_trips(tmp_path: Path) -> None:
 
 
 def test_store_and_message_handler_share_one_file(tmp_path: Path) -> None:
-    """SessionStore + the log handler write the same per-chat db without clobber."""
+    """Verify the store and the log handler share one per-chat db without clobber."""
     store = _store(tmp_path)
     s = store.create(7)
     db = tmp_path / "sessions" / "7.db"

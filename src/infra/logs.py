@@ -58,6 +58,12 @@ class BotLogs:
         capacity: int = DEFAULT_CHAT_LOGGER_CAPACITY,
         messages_dir: Path | None = None,
     ) -> None:
+        """Set up this bot's general log file and the per-chat logger registry.
+
+        ``base_dir`` enables file logging (``bot.log`` + per-chat ``.log``);
+        ``messages_dir`` enables the structured SQLite mirror. Either being None
+        disables that sink (e.g. in tests).
+        """
         self._name = name
         self._base = base_dir
         self._capacity = capacity
@@ -81,6 +87,7 @@ class BotLogs:
 
     @property
     def general(self) -> logging.Logger:
+        """The bot-wide general logger (``bot.<name>``)."""
         return self._general
 
     def set_session_resolver(
@@ -95,6 +102,13 @@ class BotLogs:
         self._session_resolver = resolver
 
     def for_chat(self, chat_id: int) -> logging.Logger:
+        """Return (creating + caching) the per-chat logger for ``chat_id``.
+
+        Lazily builds a logger writing to ``<chat_id>.log`` plus the optional
+        SQLite mirror, records it in the LRU as most-recently-used, and evicts
+        the least-recently-used logger when over capacity. Returns a no-op
+        logger when file logging is disabled.
+        """
         if self._base is None:
             return _NOOP
         existing = self._chat_loggers.get(chat_id)
@@ -140,6 +154,7 @@ class BotLogs:
         return log
 
     def _evict(self, chat_id: int, log: logging.Logger) -> None:
+        """Close an evicted chat logger's handlers and drop it from the registry."""
         for handler in list(log.handlers):
             with contextlib.suppress(Exception):
                 handler.close()

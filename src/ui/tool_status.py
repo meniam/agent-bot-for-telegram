@@ -84,6 +84,7 @@ _TOOL_EMOJI: dict[str, str] = {
 
 
 def _one_line(text: str, limit: int = _STATUS_LINE_MAX) -> str:
+    """Collapse whitespace to one line and truncate with an ellipsis."""
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
@@ -91,11 +92,13 @@ def _one_line(text: str, limit: int = _STATUS_LINE_MAX) -> str:
 
 
 def _tool_display(tool_name: str) -> str:
+    """Prefix the tool name with its emoji (a wrench for unknown tools)."""
     emoji = _TOOL_EMOJI.get(tool_name.replace("_", "").replace("-", "").lower(), "🔧")
     return f"{emoji} {tool_name}"
 
 
 def _tool_input_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the payload's `tool_input` dict, or the payload itself."""
     tool_input = payload.get("tool_input")
     if isinstance(tool_input, dict):
         return tool_input
@@ -103,6 +106,7 @@ def _tool_input_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _format_path_brief(path: str, working_dir: Path | None) -> str:
+    """Shorten a path: `@/…` relative to working_dir, else its last parts."""
     raw = Path(path).expanduser()
     if working_dir is not None:
         if raw.is_absolute():
@@ -126,6 +130,7 @@ def _tool_brief(
     tool_input: dict[str, Any],
     working_dir: Path | None = None,
 ) -> str:
+    """Build a short status description from the tool's primary input field."""
     if tool_name == "TodoWrite":
         todos = tool_input.get("todos") or []
         return f"{len(todos)} todo(s)"
@@ -144,6 +149,8 @@ def _tool_brief(
 
 
 class ToolStatusMirror:
+    """Render Claude SDK tool lifecycle events as a live chat status line."""
+
     def __init__(
         self,
         bot: Bot,
@@ -153,6 +160,7 @@ class ToolStatusMirror:
         bot_name: str,
         working_dir: str | None = None,
     ) -> None:
+        """Store collaborators and resolve the optional working directory."""
         self._bot = bot
         self._tr = tr
         self._bot_logs = bot_logs
@@ -170,6 +178,7 @@ class ToolStatusMirror:
         self._last_status_message.pop(chat_id, None)
 
     async def _upsert_status(self, chat_id: int, body: str) -> None:
+        """Edit the chat's status message in place, or send a new one."""
         body = _one_line(body)
         html_body = f"<code>{_html.escape(body[:TG_LIMIT])}</code>"
         rich = InputRichMessage(html=html_body)
@@ -204,6 +213,7 @@ class ToolStatusMirror:
         tool_name: str,
         payload: dict[str, Any],
     ) -> None:
+        """Mirror one pre/post tool event into the chat, logging on failure."""
         cl = self._bot_logs.for_chat(chat_id)
         try:
             tool_display = _tool_display(tool_name)

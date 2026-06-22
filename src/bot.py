@@ -14,7 +14,6 @@ and gathers every bot under one `asyncio.gather`.
 
 import asyncio
 import logging
-from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -29,16 +28,19 @@ from .config import load as load_config
 from .handlers import register_all
 from .handlers.context import BotContext
 from .i18n import Translator
+from .infra.access_control import make_acl
 from .infra.agent_factory import create_agent_backend
 from .infra.commands import CommandDef, load_commands
 from .infra.interactions import TelegramInteractionGate
 from .infra.logs import BotLogs, setup_console
 from .infra.session_store import SessionStore
+from .infra.skills_linker import link_skills
 from .infra.streaming import DraftStreamer
 from .infra.task_runner import TaskRunner
 from .infra.task_scheduler import TaskScheduler
 from .infra.task_store import TaskStore
 from .infra.task_tool import build_task_server
+from .services.system_prompt_builder import compose_system_prompt
 from .services.task_service import TaskService
 from .services.transcribe import GroqTranscriber
 from .services.upload_store import UploadStore
@@ -49,58 +51,17 @@ from .ui.plan_router import PlanRouter
 from .ui.reactions import ReactionPicker
 from .ui.tool_status import ToolStatusMirror
 
-BUILTIN_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "config" / "system_prompt.md"
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / "var" / "sessions"
-SKILLS_DIR = Path(__file__).resolve().parent.parent / ".agents" / "skills"
-
-# Per-provider skills directory (relative to working_dir) the agent scans.
-PROVIDER_SKILLS_SUBDIR: dict[str, str] = {
-    "claude": ".claude/skills",
-    "codex": ".codex/skills",
-    "pi": ".pi/skills",
-}
-
-
-def _link_skills(
-    working_dir: str | None, provider: str, glog: logging.Logger, name: str
-) -> None:
-    """Symlink runtime skills from ``.agents/skills`` into the provider's dir.
-
-    The agent runs with ``cwd=working_dir`` and scans the current provider's
-    skills directory (``.claude/skills`` for Claude, etc.). Linking (not copying)
-    keeps ``.agents/skills`` the single source of truth. Existing real
-    directories are left untouched; only our own stale symlinks are refreshed.
-    """
-    subdir = PROVIDER_SKILLS_SUBDIR.get(provider)
-    if not working_dir or subdir is None or not SKILLS_DIR.is_dir():
-        return
-    target_root = Path(working_dir).expanduser() / subdir
-    try:
-        target_root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        glog.warning("[%s] skills dir create failed %s: %s", name, target_root, exc)
-        return
-    for src in sorted(SKILLS_DIR.iterdir()):
-        if not src.is_dir():
-            continue
-        link = target_root / src.name
-        try:
-            if link.is_symlink():
-                if link.resolve() == src.resolve():
-                    continue
-                link.unlink()
-            elif link.exists():
-                glog.warning("[%s] skill not linked, real dir exists: %s", name, link)
-                continue
-            link.symlink_to(src, target_is_directory=True)
-            glog.info("[%s] linked skill: %s -> %s", name, link.name, src)
-        except OSError as exc:
-            glog.warning("[%s] skill link failed %s: %s", name, link, exc)
 
 
 def _build_bot_command_list(
     tr: Translator, commands: list[CommandDef], *, tasks_enabled: bool = False
 ) -> list[BotCommand]:
+    """Build the Telegram command menu: built-ins plus custom commands.
+
+    The ``/tasks`` and ``/task`` entries are included only when
+    ``tasks_enabled`` is set.
+    """
     builtin = [
         BotCommand(command="start",   description=tr.t("bot_command_start")),
         BotCommand(command="new",     description=tr.t("bot_command_new")),
@@ -130,6 +91,7 @@ def _build_bot_command_list(
 
 
 def _make_bot(cfg: BotConfig) -> Bot:
+    """Construct the aiogram ``Bot`` with HTML parse mode and previews off."""
     return Bot(
         token=cfg.telegram_bot_token.get_secret_value(),
         default=DefaultBotProperties(
@@ -153,6 +115,7 @@ def _messages_dir(cfg: BotConfig) -> Path | None:
 
 
 def _make_logs(cfg: BotConfig) -> tuple[BotLogs, logging.Logger, Path | None]:
+    """Build the bot's logging stack; return logs, general logger, and log dir."""
     bot_log_dir: Path | None = None
     if cfg.logs_dir:
         bot_log_dir = Path(cfg.logs_dir) / cfg.name
@@ -166,37 +129,10 @@ def _make_logs(cfg: BotConfig) -> tuple[BotLogs, logging.Logger, Path | None]:
     return bot_logs, bot_logs.general, bot_log_dir
 
 
-def _make_acl(
-    cfg: BotConfig, glog: logging.Logger
-) -> Callable[[int], bool]:
-    """Build the fail-closed `is_allowed` predicate; log the resulting policy."""
-    allowed_set: set[int] = set(cfg.allowed_chat_ids)
-    blacklist_set: set[int] = set(cfg.blacklist_chat_ids)
-
-    def is_allowed(chat_id: int) -> bool:
-        if chat_id in blacklist_set:
-            return False
-        if cfg.allowed_for_all:
-            return True
-        return chat_id in allowed_set
-
-    if cfg.allowed_for_all:
-        glog.warning(
-            "[%s] access: OPEN TO EVERYONE (allowed_for_all=true)", cfg.name
-        )
-    else:
-        glog.info(
-            "[%s] access restricted to %d chat_id(s)", cfg.name, len(allowed_set)
-        )
-    if blacklist_set:
-        glog.info("[%s] blacklist: %d chat_id(s)", cfg.name, len(blacklist_set))
-
-    return is_allowed
-
-
 def _make_transcriber(
     cfg: BotConfig, http: aiohttp.ClientSession, glog: logging.Logger
 ) -> GroqTranscriber | None:
+    """Build the Groq voice transcriber, or None when no API key is configured."""
     if cfg.groq_api_key is None:
         return None
     transcriber = GroqTranscriber(
@@ -214,6 +150,7 @@ def _make_transcriber(
 def _make_uploads(
     cfg: BotConfig, glog: logging.Logger
 ) -> UploadStore | None:
+    """Build the upload store, or None when no uploads directory is configured."""
     if not cfg.uploads_dir:
         return None
     uploads = UploadStore(Path(cfg.uploads_dir))
@@ -224,6 +161,7 @@ def _make_uploads(
 def _load_custom_commands(
     cfg: BotConfig, glog: logging.Logger
 ) -> list[CommandDef]:
+    """Load custom command definitions from the configured commands directory."""
     if not cfg.commands_dir:
         return []
     commands = load_commands(Path(cfg.commands_dir))
@@ -236,19 +174,14 @@ def _load_custom_commands(
     return commands
 
 
-def _load_builtin_system_prompt() -> str:
-    return BUILTIN_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
-
-
-def _compose_system_prompt(cfg: BotConfig, tr: Translator) -> str:
-    bot_prompt = (cfg.system_prompt or tr.t("default_system_prompt")).strip()
-    builtin_prompt = _load_builtin_system_prompt()
-    if not bot_prompt:
-        return builtin_prompt
-    return f"{builtin_prompt}\n\nBot-specific instructions:\n\n{bot_prompt}"
-
-
 async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
+    """Build one bot's dependency graph, register handlers, and long-poll.
+
+    Constructs the agent backend, sessions, gate, streamer and `BotContext`,
+    wires the ACL middleware and handlers, starts the task scheduler when
+    enabled, then runs `start_polling` until cancellation, closing the agent
+    and bot session on shutdown.
+    """
     bot = _make_bot(cfg)
     me = await bot.get_me()
     bot_username = me.username or f"bot_{me.id}"
@@ -259,14 +192,14 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     glog.info("[%s] lang: %s", cfg.name, cfg.lang)
     if cfg.working_dir:
         glog.info("[%s] working_dir: %s", cfg.name, cfg.working_dir)
-        _link_skills(cfg.working_dir, cfg.agent_provider, glog, cfg.name)
+        link_skills(cfg.working_dir, cfg.agent_provider, glog, cfg.name)
     if bot_log_dir:
         glog.info("[%s] logs: %s", cfg.name, bot_log_dir)
 
     tr = Translator(cfg.lang)
-    system_prompt = _compose_system_prompt(cfg, tr)
+    system_prompt = compose_system_prompt(cfg, tr)
     reaction_picker = ReactionPicker.from_translator(tr)
-    is_allowed = _make_acl(cfg, glog)
+    is_allowed = make_acl(cfg, glog)
 
     # Sessions live in the same per-chat .db as the message log; without a
     # logs/messages dir they get a standalone db dir under var/sessions.
@@ -374,7 +307,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     if tasks is not None:
         workdir_lock = asyncio.Lock()
         runner = TaskRunner(
-            bot=bot,
+            deliver=partial(send_md_to_chat, bot),
             cfg=cfg,
             store=tasks,
             agent=agent,
@@ -423,6 +356,7 @@ async def _supervise(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
 
 
 async def main() -> None:
+    """Load the config and supervise every configured bot concurrently."""
     setup_console()
     bots = load_config()
     logging.info("loaded %d bot(s): %s", len(bots), ", ".join(bots.keys()))

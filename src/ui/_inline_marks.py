@@ -29,9 +29,16 @@ _PostFn = Callable[[StateInline], None]
 
 
 def _make_rule(marker: str, node_type: str, tag: str) -> tuple[_RuleFn, _PostFn]:
+    """Build a (tokenize, postprocess) rule pair for a doubled ``marker`` syntax.
+
+    Models the built-in strikethrough delimiter logic, emitting
+    ``{node_type}_open``/``_close`` tokens with HTML ``tag`` for each matched
+    ``marker``-doubled span.
+    """
     marker_code = ord(marker)
 
     def tokenize(state: StateInline, silent: bool) -> bool:
+        """Scan a doubled-marker run and push text tokens plus delimiters."""
         if silent:
             return False
 
@@ -72,6 +79,7 @@ def _make_rule(marker: str, node_type: str, tag: str) -> tuple[_RuleFn, _PostFn]
         return True
 
     def _post(state: StateInline, delimiters: list[Delimiter]) -> None:
+        """Turn matched delimiter pairs into open/close tokens; fix lone markers."""
         lone_markers: list[int] = []
         maximum = len(delimiters)
 
@@ -126,6 +134,7 @@ def _make_rule(marker: str, node_type: str, tag: str) -> tuple[_RuleFn, _PostFn]
                 )
 
     def postprocess(state: StateInline) -> None:
+        """Run ``_post`` over the top-level and per-token delimiter lists."""
         tokens_meta = state.tokens_meta
         maximum = len(state.tokens_meta)
         _post(state, state.delimiters)
