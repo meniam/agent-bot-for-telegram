@@ -75,6 +75,7 @@ async def _fire_for_upload(
     caption = (message.caption or "").strip()
 
     async def _on_fire(m: Message, cap: str) -> None:
+        """React to the (debounced) message and run the agent turn."""
         await react_to(ctx, m, cap)
         await reply_with_agent(ctx, m, cap, cl)
 
@@ -84,6 +85,7 @@ async def _fire_for_upload(
 async def handle_photo(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save the largest photo size, queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -118,6 +120,7 @@ async def handle_photo(
 async def handle_document(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save an uploaded document, queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -153,6 +156,7 @@ async def handle_document(
 async def handle_sticker(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save a sticker (image or binary by type), queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -193,6 +197,7 @@ async def handle_sticker(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the photo, document, and sticker handlers on ``dp``."""
     dp.message.register(handle_photo, F.photo)
     dp.message.register(handle_document, F.document)
     dp.message.register(handle_sticker, F.sticker)

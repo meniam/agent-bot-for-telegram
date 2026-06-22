@@ -17,7 +17,10 @@ ALBUM_DEBOUNCE_SEC = 1.5
 
 
 class AlbumDebouncer:
+    """Debounce album arrivals so the agent fires once per media group."""
+
     def __init__(self, glog: logging.Logger, bot_name: str) -> None:
+        """Store loggers and init the per-group timer and caption maps."""
         self._glog = glog
         self._bot_name = bot_name
         self._timers: dict[str, asyncio.Task[None]] = {}
@@ -30,10 +33,10 @@ class AlbumDebouncer:
         cl: logging.Logger,
         on_fire: Callable[[Message, str], Awaitable[None]],
     ) -> None:
-        """Fire `on_fire(message, caption)` immediately for a single item or
-        after a short quiet period for an album. The `message` captured here
-        is the LAST item observed in the album — react_to lands on it,
-        preserving the existing behavior.
+        """Fire `on_fire` now for a single item, or after a quiet period for an album.
+
+        The `message` passed to `on_fire` is the LAST item observed in the
+        album — react_to lands on it, preserving the existing behavior.
         """
         mg = message.media_group_id
         if not mg:
@@ -48,6 +51,7 @@ class AlbumDebouncer:
             existing.cancel()
 
         async def _delayed() -> None:
+            """Wait out the debounce, then fire with the collected caption."""
             try:
                 await asyncio.sleep(ALBUM_DEBOUNCE_SEC)
             except asyncio.CancelledError:

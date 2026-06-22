@@ -22,6 +22,7 @@ from claude_agent_sdk import (
     query,
 )
 
+from .agent_base import BaseAgentBackend
 from .agent_types import StreamChunk, ToolEventCallback
 from .session_store import Session, SessionStore
 from .task_tool import TASK_TOOL_NAME
@@ -53,7 +54,9 @@ CLAUDE_MODELS: tuple[tuple[str, str], ...] = (
 )
 
 
-class ClaudeAgentBackend:
+class ClaudeAgentBackend(BaseAgentBackend):
+    """Claude Agent SDK backend: one live ``ClaudeSDKClient`` per chat."""
+
     provider = "claude"
 
     def __init__(
@@ -69,54 +72,32 @@ class ClaudeAgentBackend:
         task_server_factory: Callable[[int], "McpSdkServerConfig | None"] | None = None,
         lang: str = "en",
     ) -> None:
-        self._store = session_store
+        """Configure prompt, cwd, model, hooks, and the per-chat client maps."""
+        self._init_base(session_store, idle_ttl_sec)
         self._on_permission = on_permission
         self._system_prompt = system_prompt
         self._lang = lang
         self._cwd = cwd
-        self._idle_ttl = idle_ttl_sec
         self._add_dirs = list(add_dirs) if add_dirs else []
         self._on_tool_event = on_tool_event
         self._initial_model = initial_model
         self._task_server_factory = task_server_factory
         self._clients: dict[int, tuple[ClaudeSDKClient, float]] = {}
-        self._locks: dict[int, asyncio.Lock] = {}
-        self._gc_task: asyncio.Task[None] | None = None
         self._modes: dict[int, str] = {}
         self._models: dict[int, str | None] = {}
 
     def available_modes(self) -> tuple[str, ...]:
+        """Return the permission modes offered for ``/mode``."""
         return CLAUDE_MODES
 
     def available_models(self) -> tuple[tuple[str, str], ...]:
+        """Return the ``(model_id, label)`` choices for ``/model``."""
         return CLAUDE_MODELS
 
-    def _ensure_gc_running(self) -> None:
-        if self._idle_ttl <= 0:
-            return
-        if self._gc_task is None or self._gc_task.done():
-            self._gc_task = asyncio.create_task(self._gc_loop())
-
-    async def _gc_loop(self) -> None:
-        interval = max(min(self._idle_ttl / 4, 60.0), 5.0)
-        try:
-            while True:
-                await asyncio.sleep(interval)
-                await self._gc_idle()
-        except asyncio.CancelledError:
-            raise
-
     async def _gc_idle(self) -> None:
-        now = time.monotonic()
-        stale = [
-            chat_id
-            for chat_id, (_client, last_used) in self._clients.items()
-            if now - last_used > self._idle_ttl
-        ]
-        for chat_id in stale:
-            lock = self._locks.get(chat_id)
-            if lock is not None and lock.locked():
-                continue
+        """Close and forget clients idle past the TTL whose lock is free."""
+        last_used = {chat_id: ts for chat_id, (_client, ts) in self._clients.items()}
+        for chat_id in self._stale_chat_ids(last_used):
             entry = self._clients.pop(chat_id, None)
             self._modes.pop(chat_id, None)
             self._models.pop(chat_id, None)
@@ -131,9 +112,6 @@ class ClaudeAgentBackend:
             else:
                 log.info("idle gc: closed client for chat_id=%s", chat_id)
 
-    def _lock(self, chat_id: int) -> asyncio.Lock:
-        return self._locks.setdefault(chat_id, asyncio.Lock())
-
     def _make_options(
         self,
         chat_id: int,
@@ -141,6 +119,7 @@ class ClaudeAgentBackend:
         session_id: str | None = None,
         resume: str | None = None,
     ) -> ClaudeAgentOptions:
+        """Build SDK options for a chat: permission gate, tool hooks, and MCP servers."""
         can_use_tool: (
             Callable[
                 [str, dict[str, Any], ToolPermissionContext],
@@ -156,6 +135,7 @@ class ClaudeAgentBackend:
                 tool_input: dict[str, Any],
                 ctx: ToolPermissionContext,
             ) -> PermissionResultAllow | PermissionResultDeny:
+                """Auto-allow the scheduling tool; defer all else to the permission gate."""
                 # The scheduling tool is permission-checked internally
                 # (TaskService) and bound to this chat, so it never prompts.
                 if tool_name == TASK_TOOL_NAME:
@@ -170,6 +150,7 @@ class ClaudeAgentBackend:
             post_matcher = "|".join(_TOOL_POST_PREVIEW_NAMES)
 
             def _hook_field(input: Any, name: str, default: Any) -> Any:
+                """Read a field from the hook input, whether it is a dict or an object."""
                 if isinstance(input, dict):
                     return input.get(name, default)
                 return getattr(input, name, default)
@@ -177,6 +158,7 @@ class ClaudeAgentBackend:
             async def pre_hook(
                 input: Any, _tool_use_id: Any, _context: Any
             ) -> dict[str, Any]:
+                """Mirror a PreToolUse hook to the tool-event callback (errors logged)."""
                 try:
                     await on_evt(
                         chat_id,
@@ -191,6 +173,7 @@ class ClaudeAgentBackend:
             async def post_hook(
                 input: Any, _tool_use_id: Any, _context: Any
             ) -> dict[str, Any]:
+                """Mirror a PostToolUse hook (input + response) to the callback (errors logged)."""
                 try:
                     payload = {
                         "tool_input": dict(
@@ -218,6 +201,7 @@ class ClaudeAgentBackend:
             }
 
         def _on_stderr(line: str) -> None:
+            """Log a line from the Claude CLI's stderr as a warning."""
             log.warning("claude cli stderr (chat_id=%s): %s", chat_id, line.rstrip())
 
         # Per-chat scheduling tool, bound to this chat_id. Registered as an MCP
@@ -245,6 +229,11 @@ class ClaudeAgentBackend:
         )
 
     async def _get_client(self, chat_id: int) -> ClaudeSDKClient:
+        """Return the chat's live client, resuming or minting a session as needed.
+
+        On a failed resume (missing/corrupt session) it mints a fresh session so
+        the chat keeps working instead of erroring out.
+        """
         self._ensure_gc_running()
         entry = self._clients.get(chat_id)
         if entry is None:
@@ -286,6 +275,7 @@ class ClaudeAgentBackend:
         return client
 
     async def ask(self, chat_id: int, prompt: str) -> str:
+        """Run one turn and return the full reply text (drains ``ask_stream``)."""
         chunks: list[str] = []
         async for chunk in self.ask_stream(chat_id, prompt):
             if chunk.kind == "text":
@@ -293,6 +283,11 @@ class ClaudeAgentBackend:
         return "".join(chunks).strip() or "(empty response)"
 
     async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
+        """Run one turn under the per-chat lock, yielding text/thinking chunks.
+
+        Prefers streamed ``content_block_delta`` events; falls back to the final
+        ``AssistantMessage`` text blocks when no delta was seen.
+        """
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             await client.query(prompt)
@@ -315,6 +310,7 @@ class ClaudeAgentBackend:
                             yield StreamChunk(kind="text", text=block.text)
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]:
+        """Return the SDK's token/context-window stats for the chat."""
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             result = await client.get_context_usage()
@@ -322,6 +318,7 @@ class ClaudeAgentBackend:
             return dict(result)
 
     async def set_permission_mode(self, chat_id: int, mode: str) -> None:
+        """Switch the live session's mode; raise ``ValueError`` for an unknown mode."""
         if mode not in CLAUDE_MODES:
             raise ValueError(f"unsupported Claude mode: {mode}")
         async with self._lock(chat_id):
@@ -331,6 +328,7 @@ class ClaudeAgentBackend:
             self._modes[chat_id] = mode
 
     async def set_model(self, chat_id: int, model: str | None) -> None:
+        """Switch the live session's model; ``None`` selects the CLI default."""
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             await client.set_model(model)
@@ -338,6 +336,7 @@ class ClaudeAgentBackend:
             self._models[chat_id] = model
 
     async def interrupt(self, chat_id: int) -> bool:
+        """Interrupt the chat's running turn (lock-free); False if none is live."""
         entry = self._clients.get(chat_id)
         if entry is None:
             return False
@@ -346,6 +345,7 @@ class ClaudeAgentBackend:
         return True
 
     async def get_mcp_status(self, chat_id: int) -> dict[str, Any]:
+        """Return MCP server status for the chat (``{"mcpServers": [...]}``)."""
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             result = await client.get_mcp_status()
@@ -353,6 +353,7 @@ class ClaudeAgentBackend:
             return dict(result)
 
     async def get_server_info(self, chat_id: int) -> dict[str, Any] | None:
+        """Return backend/server info for the chat, or None when unavailable."""
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
             result = await client.get_server_info()
@@ -360,12 +361,15 @@ class ClaudeAgentBackend:
             return dict(result) if result else None
 
     def current_mode(self, chat_id: int) -> str:
+        """Return the mirrored current mode, defaulting to ``"default"``."""
         return self._modes.get(chat_id, "default")
 
     def current_model(self, chat_id: int) -> str | None:
+        """Return the mirrored current model, or the initial model if none is live."""
         return self._models.get(chat_id, self._initial_model)
 
     def has_session(self, chat_id: int) -> bool:
+        """Return whether a live client currently exists for the chat."""
         return chat_id in self._clients
 
     async def _drop_client(self, chat_id: int) -> None:
@@ -397,9 +401,11 @@ class ClaudeAgentBackend:
             return session
 
     async def delete_session(self, chat_id: int, sid: str) -> Session | None:
-        """Delete the given session. If it was current, drop the live client so
-        the next turn resumes the new current. Returns the deleted session, or
-        None if the id is unknown."""
+        """Delete the given session, returning it or None if the id is unknown.
+
+        If it was current, drop the live client so the next turn resumes the new
+        current session.
+        """
         async with self._lock(chat_id):
             target = self._store.get_by_id(chat_id, sid)
             if target is None:
@@ -409,14 +415,13 @@ class ClaudeAgentBackend:
             self._store.delete(chat_id, target.id)
             return target
 
-    def list_sessions(self, chat_id: int) -> list[Session]:
-        return self._store.all_sessions(chat_id)
-
-    def current_session(self, chat_id: int) -> Session | None:
-        return self._store.current(chat_id)
-
     async def generate_title(self, text: str) -> str | None:
-        """One-shot Haiku call to name a session. Returns None on failure."""
+        """One-shot, single-turn SDK call to name a session.
+
+        Runs on the bot's configured model (``self._initial_model``; None → CLI
+        default) — never assumes a specific model like Haiku is available on the
+        account. Returns None on failure.
+        """
         prompt = _TITLE_PROMPT.format(lang=self._lang) + text[:2000]
         # Stay on the bot's configured model/provider; never assume a specific
         # model (e.g. Haiku) is available on this account. None → CLI default.
@@ -458,6 +463,7 @@ class ClaudeAgentBackend:
             _tool_input: dict[str, Any],
             _ctx: ToolPermissionContext,
         ) -> PermissionResultAllow | PermissionResultDeny:
+            """Allow only tools in the task's allowlist; deny everything else silently."""
             if tool_name in allow:
                 return PermissionResultAllow()
             return PermissionResultDeny(
@@ -478,6 +484,7 @@ class ClaudeAgentBackend:
         # A `can_use_tool` callback forces streaming mode: the prompt must be an
         # AsyncIterable of message dicts, not a plain string.
         async def _prompt_stream() -> AsyncIterator[dict[str, Any]]:
+            """Yield the prompt as a one-message user stream (streaming mode requires it)."""
             yield {
                 "type": "user",
                 "message": {"role": "user", "content": prompt},
@@ -492,11 +499,13 @@ class ClaudeAgentBackend:
         return "".join(parts).strip()
 
     async def reset(self, chat_id: int) -> None:
+        """Drop the chat's live client and forget its lock (stored list untouched)."""
         async with self._lock(chat_id):
             await self._drop_client(chat_id)
         self._locks.pop(chat_id, None)
 
     async def close_all(self) -> None:
+        """Cancel the idle-GC task and reset every live client (shutdown)."""
         if self._gc_task is not None and not self._gc_task.done():
             self._gc_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):

@@ -16,6 +16,7 @@ from src.infra.session_store import Session
 
 
 def _has_fts5() -> bool:
+    """Report whether the SQLite build supports the FTS5 extension."""
     conn = sqlite3.connect(":memory:")
     try:
         conn.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
@@ -32,6 +33,7 @@ requires_fts5 = pytest.mark.skipif(
 
 
 def _record(msg: str, *, role: str | None = None, tool: str | None = None) -> logging.LogRecord:
+    """Build a LogRecord with optional ``role`` and ``tool`` extras."""
     rec = logging.LogRecord("t", logging.INFO, __file__, 1, msg, None, None)
     if role is not None:
         rec.role = role
@@ -41,6 +43,7 @@ def _record(msg: str, *, role: str | None = None, tool: str | None = None) -> lo
 
 
 def _rows(db: Path, table: str) -> list[dict[str, object]]:
+    """Read every row of ``table`` as a list of dicts."""
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     try:
@@ -50,6 +53,7 @@ def _rows(db: Path, table: str) -> list[dict[str, object]]:
 
 
 def test_emit_defaults_role_system_and_resolves_session(tmp_path: Path) -> None:
+    """Default the role to ``system`` and persist the resolved session."""
     db = tmp_path / "x.db"
     sess = Session("sess-1", "Title", auto_titled=False, created_at=1.0, last_used=2.0)
     h = SqliteChatLogHandler(db, session_of=lambda: sess)
@@ -69,6 +73,7 @@ def test_emit_defaults_role_system_and_resolves_session(tmp_path: Path) -> None:
 
 
 def test_emit_applies_logrecord_args(tmp_path: Path) -> None:
+    """Interpolate ``%``-style LogRecord args into the stored message."""
     db = tmp_path / "x.db"
     h = SqliteChatLogHandler(db)
     rec = logging.LogRecord("t", logging.INFO, __file__, 1, "n=%s ok=%d", ("Read", 7), None)
@@ -98,6 +103,7 @@ def test_emit_swallows_session_resolver_error(
 
 
 def test_emit_records_iso_created_at(tmp_path: Path) -> None:
+    """Store the raw ts plus an ISO-second ``created_at`` string."""
     db = tmp_path / "x.db"
     h = SqliteChatLogHandler(db)
     rec = _record("ts-check")
@@ -110,6 +116,7 @@ def test_emit_records_iso_created_at(tmp_path: Path) -> None:
 
 
 def test_emit_no_resolver_leaves_sessions_empty(tmp_path: Path) -> None:
+    """Leave sessions empty and ``session_id`` NULL without a resolver."""
     db = tmp_path / "x.db"
     h = SqliteChatLogHandler(db)
     h.emit(_record("orphan", role="user"))
@@ -133,6 +140,7 @@ def test_long_lived_handler_visible_to_reader(tmp_path: Path) -> None:
 
 
 def test_emit_role_and_tool_from_extra(tmp_path: Path) -> None:
+    """Persist ``role`` and ``tool`` taken from LogRecord extras."""
     db = tmp_path / "x.db"
     h = SqliteChatLogHandler(db)
     h.emit(_record("hook pre: Read", role="tool", tool="Read"))
@@ -145,6 +153,7 @@ def test_emit_role_and_tool_from_extra(tmp_path: Path) -> None:
 
 
 def test_session_upsert_is_idempotent(tmp_path: Path) -> None:
+    """Upsert a session in place, keeping one row with the latest title."""
     db = tmp_path / "x.db"
     box = {"s": Session("s1", "First", auto_titled=False, created_at=1.0, last_used=2.0)}
     h = SqliteChatLogHandler(db, session_of=lambda: box["s"])
@@ -178,6 +187,7 @@ def _seed(db: Path) -> None:
 
 
 def test_query_latest_no_interval(tmp_path: Path) -> None:
+    """Return the latest ``limit`` rows in chronological order."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, limit=2)
@@ -185,6 +195,7 @@ def test_query_latest_no_interval(tmp_path: Path) -> None:
 
 
 def test_query_filters_session_and_role(tmp_path: Path) -> None:
+    """Filter returned rows by ``session_id`` and by ``role``."""
     db = tmp_path / "x.db"
     _seed(db)
     by_sess = query_messages(db, session_id="s1")
@@ -194,6 +205,7 @@ def test_query_filters_session_and_role(tmp_path: Path) -> None:
 
 
 def test_query_interval_ascending(tmp_path: Path) -> None:
+    """Return rows within a ``since``/``until`` interval ascending."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, since=101.0, until=102.0)
@@ -201,6 +213,7 @@ def test_query_interval_ascending(tmp_path: Path) -> None:
 
 
 def test_query_caps_limit(tmp_path: Path) -> None:
+    """Cap an over-large limit at the available row count."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, limit=MESSAGES_MAX_LIMIT + 1000)
@@ -208,10 +221,12 @@ def test_query_caps_limit(tmp_path: Path) -> None:
 
 
 def test_query_missing_file_returns_empty(tmp_path: Path) -> None:
+    """Return an empty list for a nonexistent database file."""
     assert query_messages(tmp_path / "nope.db") == []
 
 
 def test_query_until_only_is_ascending_inclusive(tmp_path: Path) -> None:
+    """Return rows up to ``until`` inclusive, ascending."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, until=101.0)
@@ -219,6 +234,7 @@ def test_query_until_only_is_ascending_inclusive(tmp_path: Path) -> None:
 
 
 def test_query_since_only_is_ascending_inclusive(tmp_path: Path) -> None:
+    """Return rows from ``since`` inclusive, ascending."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, since=102.0)
@@ -226,6 +242,7 @@ def test_query_since_only_is_ascending_inclusive(tmp_path: Path) -> None:
 
 
 def test_query_interval_plus_role(tmp_path: Path) -> None:
+    """Combine an interval filter with a role filter."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, since=100.0, until=103.0, role="user")
@@ -233,12 +250,14 @@ def test_query_interval_plus_role(tmp_path: Path) -> None:
 
 
 def test_query_interval_empty_range(tmp_path: Path) -> None:
+    """Return an empty list when the interval matches no rows."""
     db = tmp_path / "x.db"
     _seed(db)
     assert query_messages(db, since=500.0, until=600.0) == []
 
 
 def test_query_limit_zero_floors_to_one(tmp_path: Path) -> None:
+    """Floor a zero limit to one, returning the latest row."""
     db = tmp_path / "x.db"
     _seed(db)
     out = query_messages(db, limit=0)
@@ -246,12 +265,14 @@ def test_query_limit_zero_floors_to_one(tmp_path: Path) -> None:
 
 
 def test_query_limit_negative_floors_to_one(tmp_path: Path) -> None:
+    """Floor a negative limit to one row."""
     db = tmp_path / "x.db"
     _seed(db)
     assert len(query_messages(db, limit=-99)) == 1
 
 
 def test_query_joins_session_title(tmp_path: Path) -> None:
+    """Join the session title, leaving it NULL for orphan rows."""
     db = tmp_path / "x.db"
     _seed(db)
     conn = sqlite3.connect(db)
@@ -268,12 +289,14 @@ def test_query_joins_session_title(tmp_path: Path) -> None:
 
 
 def test_query_empty_db_file_returns_empty(tmp_path: Path) -> None:
+    """Return an empty list for an existing but table-less file."""
     db = tmp_path / "empty.db"
     db.write_bytes(b"")  # exists but has no tables
     assert query_messages(db) == []
 
 
 def test_query_unknown_role_returns_empty(tmp_path: Path) -> None:
+    """Return an empty list for a role that matches no rows."""
     db = tmp_path / "x.db"
     _seed(db)
     assert query_messages(db, role="ghost") == []
@@ -294,6 +317,7 @@ def test_query_role_is_bound_not_interpolated(tmp_path: Path) -> None:
 
 
 def test_query_session_id_is_bound_not_interpolated(tmp_path: Path) -> None:
+    """Bind a ``session_id`` injection payload as a literal value."""
     db = tmp_path / "x.db"
     _seed(db)
     assert query_messages(db, session_id=_INJECTION) == []
@@ -301,8 +325,7 @@ def test_query_session_id_is_bound_not_interpolated(tmp_path: Path) -> None:
 
 
 def test_query_payload_matches_only_as_literal(tmp_path: Path) -> None:
-    """If a row's role literally equals the payload, it is returned verbatim —
-    proving the value path treats it as data, not SQL."""
+    """Return a row whose role literally equals the injection payload."""
     db = tmp_path / "x.db"
     SqliteChatLogHandler(db).close()
     conn = sqlite3.connect(db)
@@ -319,6 +342,7 @@ def test_query_payload_matches_only_as_literal(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_match_payload_does_not_drop_table(tmp_path: Path) -> None:
+    """Treat a malicious MATCH payload as text, leaving the table intact."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     # Malicious MATCH text → at worst a syntax error → []; never executes DDL.
@@ -329,6 +353,7 @@ def test_search_match_payload_does_not_drop_table(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_filters_are_bound_not_interpolated(tmp_path: Path) -> None:
+    """Bind search ``role``/``session_id`` injection payloads as literals."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     assert search_messages(db, "оплат", role=_INJECTION) == []
@@ -391,6 +416,7 @@ def _seed_fts(db: Path, *, via_handler: bool) -> None:
 
 @requires_fts5
 def test_search_finds_substring_via_trigger(tmp_path: Path) -> None:
+    """Match a substring across trigram-indexed rows and return snippets."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     # trigram → "оплат" matches both "оплата" and "оплату".
@@ -404,6 +430,7 @@ def test_search_finds_substring_via_trigger(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_backfills_preexisting_rows(tmp_path: Path) -> None:
+    """Build the FTS index lazily and find rows that predate it."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=False)  # rows exist before any FTS table
     out = search_messages(db, "доставку")
@@ -412,6 +439,7 @@ def test_search_backfills_preexisting_rows(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_combines_filters(tmp_path: Path) -> None:
+    """Combine a search query with role and session filters."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     by_role = search_messages(db, "оплат", role="user")
@@ -422,12 +450,14 @@ def test_search_combines_filters(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_no_match_returns_empty(tmp_path: Path) -> None:
+    """Return an empty list when the query matches no rows."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     assert search_messages(db, "несуществующее") == []
 
 
 def test_search_missing_file_or_blank_query_returns_empty(tmp_path: Path) -> None:
+    """Return an empty list for a missing file or a blank query."""
     assert search_messages(tmp_path / "nope.db", "anything") == []
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
@@ -436,6 +466,7 @@ def test_search_missing_file_or_blank_query_returns_empty(tmp_path: Path) -> Non
 
 @requires_fts5
 def test_search_snippet_wraps_match_in_brackets(tmp_path: Path) -> None:
+    """Wrap the matched term in brackets within the returned snippet."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     out = search_messages(db, "достав")
@@ -445,6 +476,7 @@ def test_search_snippet_wraps_match_in_brackets(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_respects_limit(tmp_path: Path) -> None:
+    """Cap the number of search results at ``limit``."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)  # two rows contain "оплат"
     assert len(search_messages(db, "оплат", limit=1)) == 1
@@ -452,6 +484,7 @@ def test_search_respects_limit(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_filters_by_interval(tmp_path: Path) -> None:
+    """Restrict search results to a ``since`` interval."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)  # "оплат" rows at ts 100 (user) and 101 (bot)
     out = search_messages(db, "оплат", since=101.0)
@@ -460,6 +493,7 @@ def test_search_filters_by_interval(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_malformed_match_returns_empty(tmp_path: Path) -> None:
+    """Degrade a malformed FTS5 query to an empty result."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     # Trailing boolean operator → FTS5 syntax error, must degrade to [].
@@ -468,6 +502,7 @@ def test_search_malformed_match_returns_empty(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_trigger_reflects_delete(tmp_path: Path) -> None:
+    """Reflect a row deletion in the FTS index via its trigger."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     assert search_messages(db, "достав")  # present before delete
@@ -480,6 +515,7 @@ def test_search_trigger_reflects_delete(tmp_path: Path) -> None:
 
 @requires_fts5
 def test_search_trigger_reflects_update(tmp_path: Path) -> None:
+    """Reflect a row update in the FTS index via its trigger."""
     db = tmp_path / "x.db"
     _seed_fts(db, via_handler=True)
     conn = sqlite3.connect(db)

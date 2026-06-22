@@ -14,15 +14,12 @@ overlap; independent scripts run without it.
 import asyncio
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from aiogram import Bot
-
 from ..config import BotConfig
-from ..ui.markdown import send_md_to_chat
 from .agent import AgentBackend
 from .task_store import TaskStore
 from .task_types import RunStatus, Task, TaskRun
@@ -45,6 +42,8 @@ def broadcast_targets(cfg: BotConfig) -> list[int]:
 
 @dataclass(slots=True)
 class RunOutcome:
+    """Result of executing one task: status, output, timing, and delivery."""
+
     status: RunStatus
     output: str
     error: str | None
@@ -60,7 +59,7 @@ class TaskRunner:
     def __init__(
         self,
         *,
-        bot: Bot,
+        deliver: Callable[[int, str], Awaitable[None]],
         cfg: BotConfig,
         store: TaskStore,
         agent: AgentBackend,
@@ -68,7 +67,8 @@ class TaskRunner:
         workdir_lock: asyncio.Lock,
         now_fn: Callable[[], datetime] | None = None,
     ) -> None:
-        self._bot = bot
+        """Wire the runner to its delivery callback, config, store, and agent."""
+        self._deliver_md = deliver
         self._cfg = cfg
         self._store = store
         self._agent = agent
@@ -77,8 +77,12 @@ class TaskRunner:
         self._now = now_fn or (lambda: datetime.now().astimezone())
 
     async def run(self, task: Task) -> RunOutcome:
-        """Execute a task (serializing on the workdir lock when needed),
-        deliver its output, and persist a history record."""
+        """Execute a task, deliver its output, and persist a history record.
+
+        Serializes on the workdir lock when the task needs it. Non-empty output
+        of a successful run is delivered to the task's targets; the run is then
+        recorded to history regardless of outcome.
+        """
         if task.needs_lock:
             async with self._workdir_lock:
                 outcome = await self._execute(task)
@@ -92,6 +96,7 @@ class TaskRunner:
         return outcome
 
     async def _execute(self, task: Task) -> RunOutcome:
+        """Run the task's script or LLM turn, catching failures into an outcome."""
         started = self._now()
         cl = self._log_for_chat(task.owner_chat_id)
         try:
@@ -130,6 +135,11 @@ class TaskRunner:
     # ----- script execution ------------------------------------------------
 
     def _resolve_script(self, task: Task) -> Path:
+        """Resolve a task's script to an existing path inside ``scripts_dir``.
+
+        Raises ValueError if no script/dir is configured, the path escapes the
+        scripts directory, or the file does not exist.
+        """
         if not task.script:
             raise ValueError("script task has no script path")
         if not self._cfg.tasks_scripts_dir:
@@ -143,6 +153,12 @@ class TaskRunner:
         return candidate
 
     async def _run_script(self, task: Task) -> tuple[int, str]:
+        """Run the task's script with a timeout; return (exit code, output).
+
+        Shell scripts run under bash, others under the current interpreter.
+        Output is decoded, truncated to the configured cap, and stripped; a
+        timeout kills the process and raises ValueError.
+        """
         script = self._resolve_script(task)
         if script.suffix in {".sh", ".bash"}:
             argv = ["/bin/bash", str(script)]
@@ -176,6 +192,11 @@ class TaskRunner:
     # ----- LLM execution (filled in Phase 4) -------------------------------
 
     async def _run_llm(self, task: Task) -> str:
+        """Run the task's prompt as an ephemeral agent turn and return its reply.
+
+        Uses the configured ``tasks.allowed_tools`` or, when unset, the
+        read-only `DEFAULT_ALLOWED_TOOLS`. Raises ValueError on a missing prompt.
+        """
         if not task.prompt:
             raise ValueError("LLM task has no prompt")
         allowed = (
@@ -190,6 +211,11 @@ class TaskRunner:
     # ----- delivery + history ----------------------------------------------
 
     async def _deliver(self, task: Task, output: str) -> list[int]:
+        """Send ``output`` to the task's targets; return the chats reached.
+
+        Global tasks broadcast to `broadcast_targets`; user tasks go to the
+        owner. A failure to one chat is logged and does not stop the rest.
+        """
         targets = (
             broadcast_targets(self._cfg)
             if task.scope == "global"
@@ -198,7 +224,7 @@ class TaskRunner:
         delivered: list[int] = []
         for chat_id in targets:
             try:
-                await send_md_to_chat(self._bot, chat_id, output)
+                await self._deliver_md(chat_id, output)
                 delivered.append(chat_id)
             except Exception:  # one bad chat must not stop the rest
                 self._log_for_chat(chat_id).exception(
@@ -209,6 +235,7 @@ class TaskRunner:
         return delivered
 
     async def _record(self, task: Task, outcome: RunOutcome) -> None:
+        """Build a `TaskRun` from the outcome and append it to history."""
         run = TaskRun(
             task_id=task.id,
             scope=task.scope,

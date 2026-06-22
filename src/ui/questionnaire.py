@@ -32,6 +32,8 @@ _QUESTIONNAIRES: dict[str, QuestionnaireSession] = {}
 
 @dataclass(slots=True, frozen=True)
 class Question:
+    """A single questionnaire question with its kind and any options."""
+
     kind: QuestionKind
     question: str
     options: tuple[str, ...] = ()
@@ -39,11 +41,15 @@ class Question:
 
 @dataclass(slots=True, frozen=True)
 class Questionnaire:
+    """A validated set of 1-5 questions parsed from an agent payload."""
+
     questions: tuple[Question, ...]
 
 
 @dataclass(slots=True)
 class QuestionnaireSession:
+    """Live state for a rendered questionnaire: position and selections."""
+
     questionnaire: Questionnaire
     chat_id: int
     message_id: int
@@ -98,6 +104,7 @@ def parse_questionnaire(text: str) -> Questionnaire | None:
 
 
 def _extract_payload(text: str) -> str | None:
+    """Pull the JSON body from a fenced block or a bare `{...}` answer."""
     stripped = text.strip()
     match = _FENCE_RE.search(stripped)
     if match is not None:
@@ -112,6 +119,7 @@ async def render_questionnaire(
     questionnaire: Questionnaire,
     t: Translator,
 ) -> None:
+    """Send the first question and register a live session keyed by a token."""
     token = secrets.token_hex(5)
     sent = await message.answer(
         _question_text(t, questionnaire, 0),
@@ -126,6 +134,7 @@ async def render_questionnaire(
 
 
 async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
+    """Handle a `qq:` callback; return the agent summary once completed, else None."""
     data = callback.data or ""
     if not data.startswith("qq:"):
         return None
@@ -228,6 +237,7 @@ async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
 
 
 def _question_text(t: Translator, questionnaire: Questionnaire, index: int) -> str:
+    """Format the prompt line for the question at `index` (1-based display)."""
     total = len(questionnaire.questions)
     question = questionnaire.questions[index]
     return t.t(
@@ -245,6 +255,7 @@ def _keyboard(
     selected: dict[int, set[int]],
     t: Translator,
 ) -> InlineKeyboardMarkup:
+    """Build the option, navigation, and done buttons for the current question."""
     question = questionnaire.questions[index]
     rows: list[list[InlineKeyboardButton]] = []
     for opt_idx, option in enumerate(question.options):
@@ -294,6 +305,7 @@ def _keyboard(
 
 
 def _missing_answers(session: QuestionnaireSession) -> list[int]:
+    """Return the 1-based indices of select questions with no selection yet."""
     missing: list[int] = []
     for idx, question in enumerate(session.questionnaire.questions):
         if question.kind == "text":
@@ -304,6 +316,7 @@ def _missing_answers(session: QuestionnaireSession) -> list[int]:
 
 
 def _summary_text(t: Translator, session: QuestionnaireSession) -> str:
+    """Render the user-facing completion summary of selected answers."""
     lines = [t.t("questionnaire_done")]
     for idx, question in enumerate(session.questionnaire.questions):
         if question.kind == "text":
@@ -327,6 +340,7 @@ def _summary_text(t: Translator, session: QuestionnaireSession) -> str:
 
 
 def _agent_summary_text(session: QuestionnaireSession) -> str:
+    """Render the answers as a prompt fed back to the agent to continue."""
     lines = ["User completed the Telegram questionnaire:"]
     for idx, question in enumerate(session.questionnaire.questions):
         if question.kind == "text":

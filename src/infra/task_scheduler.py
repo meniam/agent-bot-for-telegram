@@ -31,6 +31,13 @@ from .task_types import (
 
 
 class TaskScheduler:
+    """Background loop that fires due tasks via `TaskRunner`.
+
+    Ticks every ``tick_interval`` seconds: loads due tasks, dedups in-flight
+    runs, drops owners that lost access, applies catch-up grace, advances
+    scheduling state before running, and fires each as a tracked coroutine.
+    """
+
     def __init__(
         self,
         *,
@@ -42,6 +49,7 @@ class TaskScheduler:
         tick_interval: int = 60,
         now_fn: Callable[[], datetime] | None = None,
     ) -> None:
+        """Wire the scheduler to its store, runner, config, and access check."""
         self._store = store
         self._runner = runner
         self._cfg = cfg
@@ -54,11 +62,13 @@ class TaskScheduler:
         self._loop_task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
+        """Start the background tick loop (idempotent)."""
         if self._loop_task is None:
             self._loop_task = asyncio.create_task(self._loop())
             self._glog.info("[%s] task scheduler started", self._cfg.name)
 
     async def stop(self) -> None:
+        """Cancel and await the tick loop (idempotent)."""
         if self._loop_task is None:
             return
         self._loop_task.cancel()
@@ -67,6 +77,10 @@ class TaskScheduler:
         self._loop_task = None
 
     async def _loop(self) -> None:
+        """Tick forever, sleeping ``tick_interval`` between passes.
+
+        A failed tick is logged and the loop continues; cancellation propagates.
+        """
         while True:
             try:
                 await self.tick()
@@ -134,11 +148,13 @@ class TaskScheduler:
         return "skip" if overdue > grace else "run"
 
     def _owner_allowed(self, task: Task) -> bool:
+        """Whether the task's owner still has access (admin for global tasks)."""
         if task.scope == "global":
             return is_admin(self._cfg, task.owner_chat_id)
         return self._is_allowed(task.owner_chat_id)
 
     async def _revoke(self, task: Task) -> None:
+        """Pause a task whose owner lost access, recording ``access_revoked``."""
         self._glog.warning(
             "[%s] task %s owner %s lost access — pausing",
             self._cfg.name,
@@ -151,6 +167,11 @@ class TaskScheduler:
         await self._store.update(revoked)
 
     async def _run_tracked(self, task: Task, now: datetime) -> None:
+        """Advance scheduling, run the task, persist its final state.
+
+        Always clears the task from the in-flight set; advancing before the run
+        prevents a slow run from double-firing.
+        """
         try:
             # Advance scheduling BEFORE running so a slow run can't double-fire.
             pre = self._advance_before_run(task, now)

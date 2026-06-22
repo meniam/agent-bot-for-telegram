@@ -54,20 +54,30 @@ class Session:
 
 
 class SessionStore:
+    """Per-chat named-session store backed by the chat's SQLite file.
+
+    Authoritative writer of the ``sessions`` table and the ``current`` pointer
+    in ``chat_meta``. Each operation opens a short-lived connection and keeps no
+    in-memory cache.
+    """
+
     def __init__(
         self,
         base_dir: Path,
         default_title: str,
     ) -> None:
+        """Store sessions under ``base_dir`` (created if needed), with ``default_title`` for new sessions."""
         self._base_dir = base_dir
         self._default_title = default_title
         base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, chat_id: int) -> Path:
+        """Return the per-chat SQLite file path for ``chat_id``."""
         return self._base_dir / f"{chat_id}.db"
 
     @staticmethod
     def _row_to_session(row: Any) -> Session:
+        """Build a `Session` from a ``sessions`` table row."""
         return Session(
             id=str(row["id"]),
             title=str(row["title"] or ""),
@@ -100,6 +110,7 @@ class SessionStore:
         return [self._row_to_session(r) for r in rows]
 
     def current_id(self, chat_id: int) -> str | None:
+        """Return the chat's current session id, or None if unset/unreadable."""
         path = self._path(chat_id)
         if not path.exists():
             return None
@@ -122,6 +133,7 @@ class SessionStore:
         return str(row[0])
 
     def current(self, chat_id: int) -> Session | None:
+        """Return the chat's current `Session`, or None if there is none."""
         sid = self.current_id(chat_id)
         if sid is None:
             return None
@@ -160,6 +172,7 @@ class SessionStore:
         return session
 
     def set_current(self, chat_id: int, sid: str) -> None:
+        """Point the chat's current pointer at session ``sid``."""
         conn = connect(self._path(chat_id))
         try:
             conn.execute(_UPSERT_CURRENT, (sid,))
@@ -168,12 +181,14 @@ class SessionStore:
             conn.close()
 
     def get_by_ordinal(self, chat_id: int, ordinal: int) -> Session | None:
+        """Return the 1-based ``ordinal`` session (creation order), or None."""
         sessions = self.all_sessions(chat_id)
         if 1 <= ordinal <= len(sessions):
             return sessions[ordinal - 1]
         return None
 
     def get_by_id(self, chat_id: int, sid: str) -> Session | None:
+        """Return the session with id ``sid``, or None if not found."""
         for s in self.all_sessions(chat_id):
             if s.id == sid:
                 return s
@@ -184,6 +199,7 @@ class SessionStore:
         return sorted(self.all_sessions(chat_id), key=lambda s: s.last_used, reverse=True)
 
     def set_title(self, chat_id: int, sid: str, title: str) -> None:
+        """Set a session's title and mark it as auto-titled."""
         conn = connect(self._path(chat_id))
         try:
             conn.execute(
@@ -195,9 +211,11 @@ class SessionStore:
             conn.close()
 
     def delete(self, chat_id: int, sid: str) -> str | None:
-        """Remove a session's meta row. If it was current, repoint current to
-        the most recently created remaining session (or None if none left).
-        Returns the new current id. The SDK's on-disk JSONL is left untouched.
+        """Remove a session's meta row and return the resulting current id.
+
+        If the deleted session was current, repoint current to the most
+        recently created remaining session (or None if none are left). The
+        SDK's on-disk JSONL is left untouched.
         """
         conn = connect(self._path(chat_id))
         try:
@@ -218,6 +236,7 @@ class SessionStore:
         return str(current) if current else None
 
     def touch(self, chat_id: int, sid: str) -> None:
+        """Update a session's ``last_used`` timestamp to now."""
         conn = connect(self._path(chat_id))
         try:
             conn.execute(

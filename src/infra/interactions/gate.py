@@ -52,6 +52,7 @@ class _AQSession:
         message_id: int,
         build_kb: Callable[[], InlineKeyboardMarkup],
     ) -> None:
+        """Capture the future, options, selection state, and keyboard builder."""
         self.fut = fut
         self.options: list[dict[str, Any]] = options
         self.selected: set[int] = set()
@@ -62,6 +63,15 @@ class _AQSession:
 
 
 class TelegramInteractionGate:
+    """Boundary between the SDK's tool-permission checks and Telegram UX.
+
+    `can_use_tool` is the single entry point the backend calls per tool use; it
+    routes the four special tools to their flow modules and everything else to
+    the generic Allow/Deny/Always prompt. The gate owns the in-flight prompt
+    registries (`_pending`, `_aq`, `_plan_pending`); the flows themselves live
+    in sibling modules and mutate that state through free functions.
+    """
+
     def __init__(
         self,
         bot: Bot,
@@ -70,6 +80,12 @@ class TelegramInteractionGate:
         send_md_callback: Callable[[int, str], Awaitable[None]] | None = None,
         chat_logger: Callable[[int], logging.Logger] | None = None,
     ) -> None:
+        """Initialize shared per-bot state and the in-flight prompt registries.
+
+        ``send_md_callback`` (if given) renders Markdown plan bodies, and
+        ``chat_logger`` routes verdicts into per-chat log files; both fall back
+        to plain sends / the module logger when omitted.
+        """
         self._bot = bot
         self._t = translator
         self._timeout = approval_timeout_sec
@@ -106,6 +122,7 @@ class TelegramInteractionGate:
     # ----- shared helpers -----
 
     def _cl(self, chat_id: int) -> logging.Logger:
+        """Return the per-chat logger, falling back to the module logger."""
         if self._chat_logger is not None:
             try:
                 return self._chat_logger(chat_id)
@@ -114,6 +131,7 @@ class TelegramInteractionGate:
         return log
 
     async def _delete_prompt(self, chat_id: int, message_id: int) -> None:
+        """Best-effort delete a prompt message, swallowing failures."""
         try:
             await self._bot.delete_message(chat_id, message_id)
         except Exception:
@@ -125,6 +143,11 @@ class TelegramInteractionGate:
         tool_input: dict[str, Any],
         ctx: ToolPermissionContext,
     ) -> str:
+        """Build the human-readable prompt body for a generic permission request.
+
+        Combines the context title/description/reason/blocked path with a
+        truncated preview of ``tool_input`` into a single block of text.
+        """
         t = self._t
         head = ctx.title or t.t("permission_request_default_title", tool=tool_name)
         parts: list[str] = [head]
@@ -153,6 +176,12 @@ class TelegramInteractionGate:
         tool_input: dict[str, Any],
         ctx: ToolPermissionContext,
     ) -> PermissionResultAllow | PermissionResultDeny:
+        """Route one tool-permission check to its flow and await the verdict.
+
+        `AskUserQuestion` / `ExitPlanMode` / `PushNotification` get bespoke flows;
+        every other tool gets the generic Allow/Deny/Always prompt. Blocks until
+        the user responds or the flow times out (timeout resolves as deny).
+        """
         if tool_name == "AskUserQuestion":
             return await aq.handle(self, chat_id, tool_input)
         if tool_name == "ExitPlanMode":
@@ -164,12 +193,15 @@ class TelegramInteractionGate:
     # ----- per-flow callback / text intake (thin wrappers) -----
 
     async def handle_callback(self, callback: CallbackQuery) -> None:
+        """Route a generic permission (`perm:`) button tap to its flow."""
         await pp.on_callback(self, callback)
 
     async def handle_aq_callback(self, callback: CallbackQuery) -> None:
+        """Route an AskUserQuestion (`aq:`) button tap to its flow."""
         await aq.on_callback(self, callback)
 
     async def handle_plan_callback(self, callback: CallbackQuery) -> None:
+        """Route an ExitPlanMode (`plan:`) button tap to its flow."""
         await pm.on_callback(self, callback)
 
     async def cancel_active_aq(self, chat_id: int) -> None:

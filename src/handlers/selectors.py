@@ -26,12 +26,14 @@ from .context import BotContext
 
 
 def _mode_label(ctx: BotContext, mode: str) -> str:
+    """Return the localized button label for ``mode`` (the id if untranslated)."""
     key = f"mode_btn_{mode}"
     label = ctx.tr.t(key)
     return mode if label == key else label
 
 
 def _mode_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
+    """Build the inline keyboard of available modes, marking the current one."""
     current = ctx.agent.current_mode(chat_id)
     rows: list[list[InlineKeyboardButton]] = []
     for m in ctx.agent.available_modes():
@@ -45,6 +47,7 @@ def _mode_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
 
 
 def _model_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
+    """Build the inline keyboard of available models, marking the current one."""
     current = ctx.agent.current_model(chat_id)  # None == SDK default
     rows: list[list[InlineKeyboardButton]] = []
     for mid, label in ctx.agent.available_models():
@@ -61,6 +64,7 @@ def _model_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
 async def _apply_mode(
     ctx: BotContext, message: Message, mode: str, cl: logging.Logger
 ) -> None:
+    """Push ``mode`` to the backend and confirm, or report the failure."""
     try:
         await ctx.agent.set_permission_mode(message.chat.id, mode)
     except Exception as e:
@@ -75,6 +79,7 @@ async def _apply_mode(
 async def _apply_model(
     ctx: BotContext, message: Message, model_id: str, cl: logging.Logger
 ) -> None:
+    """Push ``model_id`` (empty = default) to the backend and confirm."""
     sdk_arg: str | None = model_id or None
     try:
         await ctx.agent.set_model(message.chat.id, sdk_arg)
@@ -98,6 +103,13 @@ async def _dispatch_choice_cb(
     valid: frozenset[str] | tuple[str, ...] | set[str] | None,
     apply: Callable[[BotContext, Message, str, logging.Logger], Awaitable[None]],
 ) -> None:
+    """Shared handler for `/mode` and `/model` choice-button taps.
+
+    Parses `<prefix>:<chat_id>:<value>` callback_data, enforces that the
+    embedded ``chat_id`` matches the firing chat (anti-forgery — ACL middleware
+    does not cover gate-style callbacks), validates ``value`` against ``valid``,
+    clears the keyboard, then runs ``apply`` to push the choice to the backend.
+    """
     data = cq.data or ""
     try:
         _, chat_id_s, value = data.split(":", 2)
@@ -129,6 +141,7 @@ async def set_mode_cmd(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Apply `/mode <arg>` directly, or show the mode-picker keyboard."""
     arg = (command.args or "").strip()
     mode_values = ctx.agent.available_modes()
     if arg:
@@ -157,6 +170,7 @@ async def set_model_cmd(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Apply `/model <arg>` directly, or show the model-picker keyboard."""
     arg = (command.args or "").strip()
     model_ids = frozenset(mid for mid, _ in ctx.agent.available_models() if mid)
     if arg:
@@ -191,6 +205,7 @@ async def mode_callback(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Handle a `mode:` button tap via the shared choice dispatcher."""
     await _dispatch_choice_cb(
         callback, ctx, cl, frozenset(ctx.agent.available_modes()), _apply_mode
     )
@@ -202,12 +217,14 @@ async def model_callback(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Handle a `model:` button tap via the shared choice dispatcher."""
     # Empty value = default; non-empty must be in _MODEL_IDS.
     model_ids = frozenset(mid for mid, _ in ctx.agent.available_models() if mid)
     await _dispatch_choice_cb(callback, ctx, cl, model_ids, _apply_model)
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the `/mode` and `/model` commands and callbacks on ``dp``."""
     dp.message.register(set_mode_cmd, Command("mode"))
     dp.message.register(set_model_cmd, Command("model"))
     dp.callback_query.register(mode_callback, F.data.startswith("mode:"))

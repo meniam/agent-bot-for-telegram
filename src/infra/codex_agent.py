@@ -16,8 +16,9 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
+from .agent_base import BaseAgentBackend
 from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
-from .session_store import Session, SessionStore
+from .session_store import SessionStore
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +37,17 @@ CODEX_RUN_TIMEOUT_SEC = 120.0
 
 @dataclass(slots=True)
 class _CodexSession:
+    """Per-chat live Codex thread plus its last-use time, model, and mode."""
+
     thread: Any
     last_used: float
     model: str | None
     mode: str
 
 
-class CodexAgentBackend:
+class CodexAgentBackend(BaseAgentBackend):
+    """Codex SDK backend: one live thread per chat (no resume; reset clears it)."""
+
     provider = "codex"
 
     def __init__(
@@ -58,10 +63,10 @@ class CodexAgentBackend:
         approval_mode: str = "default",
         codex_factory: Callable[[], Any] | None = None,
     ) -> None:
-        self._store = session_store
+        """Configure prompt, cwd, model, sandbox, approval mode, and session maps."""
+        self._init_base(session_store, idle_ttl_sec)
         self._system_prompt = system_prompt
         self._cwd = cwd
-        self._idle_ttl = idle_ttl_sec
         self._add_dirs = list(add_dirs) if add_dirs else []
         self._on_tool_event = on_tool_event
         self._initial_model = initial_model
@@ -70,50 +75,44 @@ class CodexAgentBackend:
         self._codex_factory = codex_factory
         self._codex: Any | None = None
         self._sessions: dict[int, _CodexSession] = {}
-        self._locks: dict[int, asyncio.Lock] = {}
-        self._gc_task: asyncio.Task[None] | None = None
         self._active_turns: dict[int, Any] = {}
 
     def available_modes(self) -> tuple[str, ...]:
+        """Return the approval modes offered for ``/mode``."""
         return CODEX_MODES
 
     def available_models(self) -> tuple[tuple[str, str], ...]:
+        """Return the ``(model_id, label)`` choices for ``/model``."""
         return CODEX_MODELS
 
-    def _lock(self, chat_id: int) -> asyncio.Lock:
-        return self._locks.setdefault(chat_id, asyncio.Lock())
-
-    def _ensure_gc_running(self) -> None:
-        if self._idle_ttl <= 0:
-            return
-        if self._gc_task is None or self._gc_task.done():
-            self._gc_task = asyncio.create_task(self._gc_loop())
-
-    async def _gc_loop(self) -> None:
-        interval = max(min(self._idle_ttl / 4, 60.0), 5.0)
-        try:
-            while True:
-                await asyncio.sleep(interval)
-                await self._gc_idle()
-        except asyncio.CancelledError:
-            raise
-
     async def _gc_idle(self) -> None:
-        now = time.monotonic()
-        stale = [
-            chat_id
-            for chat_id, session in self._sessions.items()
-            if now - session.last_used > self._idle_ttl
-        ]
-        for chat_id in stale:
-            lock = self._locks.get(chat_id)
-            if lock is not None and lock.locked():
-                continue
-            self._sessions.pop(chat_id, None)
+        """Close and forget threads idle past the TTL, dropping their locks too."""
+        last_used = {cid: s.last_used for cid, s in self._sessions.items()}
+        for chat_id in self._stale_chat_ids(last_used):
+            session = self._sessions.pop(chat_id, None)
             self._locks.pop(chat_id, None)
+            if session is not None:
+                await self._close_thread(session.thread)
             log.info("idle gc: dropped Codex thread for chat_id=%s", chat_id)
 
+    @staticmethod
+    async def _close_thread(thread: Any) -> None:
+        """Close a thread if it exposes ``close``, awaiting and suppressing errors."""
+        closer = getattr(thread, "close", None)
+        if closer is None:
+            return
+        with contextlib.suppress(Exception):
+            result = closer()
+            if hasattr(result, "__await__"):
+                await result
+
     async def _ensure_runtime(self) -> Any:
+        """Lazily build and enter the shared ``AsyncCodex`` runtime, caching it.
+
+        Uses the injected factory when present (tests); otherwise imports
+        ``openai_codex`` and wires the resolved binary/cwd into ``CodexConfig``.
+        Raises ``RuntimeError`` if the package is missing.
+        """
         if self._codex is not None:
             return self._codex
         if self._codex_factory is not None:
@@ -144,6 +143,7 @@ class CodexAgentBackend:
         return codex
 
     def _resolve_codex_bin(self) -> str | None:
+        """Locate the ``codex`` binary on PATH or in the macOS app bundle."""
         for candidate in (
             shutil.which("codex"),
             "/Applications/Codex.app/Contents/Resources/codex",
@@ -153,6 +153,11 @@ class CodexAgentBackend:
         return None
 
     async def _start_thread(self, chat_id: int) -> Any:
+        """Start a new Codex thread for the chat and record its session.
+
+        Passes only the configured model/sandbox/cwd/instructions/approval that
+        resolve to non-None values, then stores the live ``_CodexSession``.
+        """
         codex = await self._ensure_runtime()
         kwargs: dict[str, Any] = {}
         model = self._initial_model
@@ -178,6 +183,18 @@ class CodexAgentBackend:
         return thread
 
     def _resolve_approval_mode(self) -> Any | None:
+        """Map the configured mode to the SDK ``ApprovalMode`` thread kwarg.
+
+        Every configured mode collapses to ``auto_review`` (the bot has no
+        interactive Codex approval gate); the raw string is returned when the
+        SDK enum is unavailable or a factory is injected (tests).
+        """
+        # Codex's SDK ``ApprovalMode`` exposes only ``auto_review`` (act without
+        # prompting) and ``deny_all`` (refuse anything needing approval). This
+        # bot has no interactive Codex approval gate, so every configured mode
+        # resolves to ``auto_review``; ``deny_all`` is intentionally never used
+        # because it would block all tool execution. The configured value is
+        # still surfaced to the user via ``current_mode`` / ``/mode``.
         if self._codex_factory is not None:
             return self._approval_mode
         try:
@@ -187,15 +204,15 @@ class CodexAgentBackend:
         approval_cls = getattr(module, "ApprovalMode", None)
         if approval_cls is None:
             return self._approval_mode
-        if self._approval_mode == "never":
-            return getattr(approval_cls, "auto_review", "auto_review")
-        if self._approval_mode == "full_auto":
-            return getattr(approval_cls, "auto_review", "auto_review")
-        if self._approval_mode == "on_request":
-            return getattr(approval_cls, "auto_review", "auto_review")
         return getattr(approval_cls, "auto_review", "auto_review")
 
     def _resolve_sandbox(self) -> Any | None:
+        """Map the configured sandbox name to the SDK ``Sandbox`` thread kwarg.
+
+        Normalizes ``danger_full_access`` to the SDK's ``full_access`` and
+        returns the raw string when the SDK enum is unavailable or a factory is
+        injected (tests).
+        """
         sandbox_name = (
             "full_access"
             if self._sandbox_name == "danger_full_access"
@@ -213,6 +230,7 @@ class CodexAgentBackend:
         return getattr(sandbox_cls, sandbox_name, sandbox_name)
 
     async def _get_thread(self, chat_id: int) -> Any:
+        """Return the chat's live thread (starting one if needed), bumping last-use."""
         self._ensure_gc_running()
         session = self._sessions.get(chat_id)
         if session is None:
@@ -221,6 +239,7 @@ class CodexAgentBackend:
         return session.thread
 
     async def ask(self, chat_id: int, prompt: str) -> str:
+        """Run one turn and return the full reply text (drains ``ask_stream``)."""
         chunks: list[str] = []
         async for chunk in self.ask_stream(chat_id, prompt):
             if chunk.kind == "text":
@@ -228,6 +247,12 @@ class CodexAgentBackend:
         return "".join(chunks).strip() or "(empty response)"
 
     async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
+        """Run one turn under the per-chat lock, yielding the final response text.
+
+        Mirrors tool lifecycle events through the callback. Raises
+        ``AgentTurnReset`` if the session is reset mid-turn or
+        ``AgentEventStreamTimeout`` if the run stalls.
+        """
         async with self._lock(chat_id):
             thread = await self._get_thread(chat_id)
             session = self._sessions[chat_id]
@@ -267,6 +292,7 @@ class CodexAgentBackend:
                 session.last_used = time.monotonic()
 
     async def _start_turn(self, thread: Any, prompt: str) -> Any:
+        """Begin a turn via ``thread.turn`` (awaiting if needed), else ``thread.run``."""
         turn_method = getattr(thread, "turn", None)
         if turn_method is not None:
             turn = turn_method(prompt)
@@ -274,6 +300,12 @@ class CodexAgentBackend:
         return thread.run(prompt)
 
     async def _wait_for_turn(self, chat_id: int, turn: Any) -> Any:
+        """Await a turn's result, draining its stream when one is exposed.
+
+        Awaitable turns are bounded by ``CODEX_RUN_TIMEOUT_SEC``; on timeout it
+        emits a post lifecycle event, cancels the turn, and raises
+        ``AgentEventStreamTimeout``.
+        """
         if hasattr(turn, "stream"):
             return await self._wait_for_streamed_turn(chat_id, turn)
         if not hasattr(turn, "__await__"):
@@ -298,6 +330,14 @@ class CodexAgentBackend:
             raise AgentEventStreamTimeout(msg) from None
 
     async def _wait_for_streamed_turn(self, chat_id: int, turn: Any) -> dict[str, Any]:
+        """Drain a streamed turn into a result dict, normalizing SDK events.
+
+        Each event is mirrored as an app-server notification, then accumulated:
+        completed items, token usage, and the terminal ``turn/completed``. Per
+        event ``wait_for`` enforces ``CODEX_RUN_TIMEOUT_SEC``; a mid-turn reset
+        raises ``AgentTurnReset`` and a ``failed`` turn raises ``RuntimeError``.
+        The stream is always closed in ``finally``.
+        """
         stream = turn.stream()
         items: list[dict[str, Any]] = []
         completed: dict[str, Any] | None = None
@@ -358,6 +398,11 @@ class CodexAgentBackend:
         }
 
     async def _handle_turn_timeout(self, chat_id: int, turn: Any) -> NoReturn:
+        """Log/emit a stalled-stream timeout, cancel the turn, and always raise.
+
+        Raises ``AgentEventStreamTimeout``; called when a streamed turn's next
+        event does not arrive within ``CODEX_RUN_TIMEOUT_SEC``.
+        """
         msg = (
             "Codex run timed out after "
             f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"
@@ -375,6 +420,7 @@ class CodexAgentBackend:
         raise AgentEventStreamTimeout(msg) from None
 
     async def _cancel_turn(self, turn: Any) -> None:
+        """Stop a turn via the first available ``interrupt``/``cancel``/``close``."""
         for method_name in ("interrupt", "cancel", "close"):
             method = getattr(turn, method_name, None)
             if method is None:
@@ -393,6 +439,7 @@ class CodexAgentBackend:
         mode: str,
         model: str | None,
     ) -> None:
+        """Emit a synthetic ``Codex`` pre/post lifecycle tool event, if a sink exists."""
         if self._on_tool_event is None:
             return
         payload: dict[str, Any] = {
@@ -407,6 +454,7 @@ class CodexAgentBackend:
         await self._on_tool_event(chat_id, phase, "Codex", payload)
 
     async def _handle_sdk_notification(self, chat_id: int, event: Any) -> None:
+        """Convert a streamed SDK event into an app-server-shaped notification."""
         method = str(getattr(event, "method", ""))
         payload = self._to_plain(getattr(event, "payload", None))
         if isinstance(payload, dict):
@@ -416,6 +464,11 @@ class CodexAgentBackend:
             )
 
     def _to_plain(self, value: Any) -> Any:
+        """Recursively convert pydantic models to JSON-safe dicts/lists.
+
+        Also unwraps the single-key ``{"root"}`` wrapper that pydantic
+        ``RootModel`` dumps produce.
+        """
         if hasattr(value, "model_dump"):
             value = value.model_dump(mode="json")
         if isinstance(value, dict) and set(value) == {"root"}:
@@ -427,6 +480,7 @@ class CodexAgentBackend:
         return value
 
     def _prepare_prompt(self, prompt: str, mode: str) -> str:
+        """Prepend plan-mode instructions to the prompt; pass through otherwise."""
         if mode != "plan":
             return prompt
         return (
@@ -437,6 +491,10 @@ class CodexAgentBackend:
         )
 
     def _extract_final_response(self, result: Any) -> str:
+        """Pull the final assistant text from a result attr or dict key.
+
+        Tries common shapes in order and falls back to ``str(result)``.
+        """
         for attr in ("final_response", "final", "text", "output_text"):
             value = getattr(result, attr, None)
             if isinstance(value, str):
@@ -449,6 +507,11 @@ class CodexAgentBackend:
         return str(result) if result is not None else ""
 
     def _final_assistant_response_from_items(self, items: list[dict[str, Any]]) -> str:
+        """Find the last assistant message text in collected stream items.
+
+        Prefers the latest ``final_answer``-phase message; otherwise returns the
+        most recent assistant message text seen.
+        """
         fallback: str | None = None
         for item in reversed(items):
             if item.get("type") != "agentMessage":
@@ -463,12 +526,14 @@ class CodexAgentBackend:
         return fallback or ""
 
     async def _emit_result_tool_events(self, chat_id: int, result: Any) -> None:
+        """Replay any tool events attached to the result through the callback."""
         if self._on_tool_event is None:
             return
         for event in self._result_events(result):
             await self.handle_app_server_event(chat_id, event)
 
     def _result_events(self, result: Any) -> list[dict[str, Any]]:
+        """Return the result's ``events`` list (attr or dict key), keeping only dicts."""
         events = getattr(result, "events", None)
         if isinstance(events, list):
             return [e for e in events if isinstance(e, dict)]
@@ -500,6 +565,7 @@ class CodexAgentBackend:
         return None
 
     def _extract_delta(self, method: str, params: dict[str, Any]) -> str | None:
+        """Pull an assistant text delta from a delta/message event, else None."""
         if "delta" not in method and "message" not in method:
             return None
         for key in ("delta", "text", "content"):
@@ -516,6 +582,12 @@ class CodexAgentBackend:
     def _extract_tool_event(
         self, method: str, params: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]] | None:
+        """Map a Codex item event to a ``(phase, tool_name, payload)`` tuple.
+
+        Returns ``pre`` for started/in-progress items and ``post`` for
+        completed/failed/declined ones; None when the item is not a recognized
+        tool call.
+        """
         item = params.get("item")
         if not isinstance(item, dict):
             item = params
@@ -536,6 +608,7 @@ class CodexAgentBackend:
         return None
 
     def _tool_name(self, item_type: str, item: dict[str, Any]) -> str:
+        """Map a Codex item type to a Telegram-facing tool name; "" if unknown."""
         if item_type == "commandExecution":
             return "Bash"
         if item_type == "fileChange":
@@ -547,6 +620,7 @@ class CodexAgentBackend:
         return ""
 
     def _tool_payload(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Project known Codex item fields into the bot's tool-input payload shape."""
         payload: dict[str, Any] = {}
         for src, dst in (
             ("command", "command"),
@@ -561,6 +635,7 @@ class CodexAgentBackend:
         return payload
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]:
+        """Return context stats; Codex exposes no live counters, so totals are zero."""
         session = self._sessions.get(chat_id)
         model = self.current_model(chat_id) or "default"
         return {
@@ -574,6 +649,7 @@ class CodexAgentBackend:
         }
 
     async def set_permission_mode(self, chat_id: int, mode: str) -> None:
+        """Set the session's mode, starting a thread if needed; ``ValueError`` if unknown."""
         if mode not in CODEX_MODES:
             raise ValueError(f"unsupported Codex mode: {mode}")
         async with self._lock(chat_id):
@@ -584,6 +660,7 @@ class CodexAgentBackend:
             session.mode = mode
 
     async def set_model(self, chat_id: int, model: str | None) -> None:
+        """Set the session's model; before a thread exists, stash it as the initial model."""
         async with self._lock(chat_id):
             session = self._sessions.get(chat_id)
             if session is None:
@@ -597,6 +674,7 @@ class CodexAgentBackend:
                     await result
 
     async def interrupt(self, chat_id: int) -> bool:
+        """Interrupt the chat's active turn; False if none is running."""
         turn = self._active_turns.get(chat_id)
         if turn is None:
             return False
@@ -611,6 +689,7 @@ class CodexAgentBackend:
         return False
 
     async def get_mcp_status(self, chat_id: int) -> dict[str, Any]:
+        """Return MCP status from the thread if exposed, else an empty list."""
         thread = await self._get_thread(chat_id)
         for method_name in ("get_mcp_status", "mcp_status"):
             method = getattr(thread, method_name, None)
@@ -623,6 +702,7 @@ class CodexAgentBackend:
         return {"mcpServers": []}
 
     async def get_server_info(self, chat_id: int) -> dict[str, Any] | None:
+        """Return server info from the thread if exposed, else a minimal fallback."""
         thread = await self._get_thread(chat_id)
         for method_name in ("get_server_info", "server_info", "info"):
             method = getattr(thread, method_name, None)
@@ -639,54 +719,33 @@ class CodexAgentBackend:
         }
 
     def current_mode(self, chat_id: int) -> str:
+        """Return the session's mode, or the configured approval mode if none."""
         session = self._sessions.get(chat_id)
         return session.mode if session else self._approval_mode
 
     def current_model(self, chat_id: int) -> str | None:
+        """Return the session's model, or the initial model if no session yet."""
         session = self._sessions.get(chat_id)
         return session.model if session else self._initial_model
 
     def has_session(self, chat_id: int) -> bool:
+        """Return whether a live thread currently exists for the chat."""
         return chat_id in self._sessions
 
-    async def new_session(self, chat_id: int) -> Session:
-        await self.reset(chat_id)
-        return self._store.create(chat_id)
-
-    async def switch_session(self, chat_id: int, sid: str) -> Session | None:
-        session = self._store.get_by_id(chat_id, sid)
-        if session is None:
-            return None
-        await self.reset(chat_id)
-        self._store.set_current(chat_id, session.id)
-        return session
-
-    async def delete_session(self, chat_id: int, sid: str) -> Session | None:
-        target = self._store.get_by_id(chat_id, sid)
-        if target is None:
-            return None
-        if self._store.current_id(chat_id) == target.id:
-            await self.reset(chat_id)
-        self._store.delete(chat_id, target.id)
-        return target
-
-    def list_sessions(self, chat_id: int) -> list[Session]:
-        return self._store.all_sessions(chat_id)
-
-    def current_session(self, chat_id: int) -> Session | None:
-        return self._store.current(chat_id)
-
     async def generate_title(self, text: str) -> str | None:
+        """Derive a title by truncating the message (no extra model call)."""
         title = " ".join(text.split())[:_TITLE_MAX_LEN].strip()
         return title or None
 
     async def ask_ephemeral(
         self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
     ) -> str:
+        """Raise ``NotImplementedError``; Codex has no stateless-turn primitive."""
         _ = (chat_id, prompt, allowed_tools)
         raise NotImplementedError("Codex backend has no ephemeral-session turn")
 
     async def reset(self, chat_id: int) -> None:
+        """Tear down the chat's thread, force-closing it if a turn is in flight."""
         lock = self._locks.get(chat_id)
         if chat_id in self._active_turns or (lock is not None and lock.locked()):
             await self._force_close_session(chat_id, reason="/new during active turn")
@@ -702,6 +761,11 @@ class CodexAgentBackend:
         self._locks.pop(chat_id, None)
 
     async def _force_close_session(self, chat_id: int, *, reason: str) -> None:
+        """Cancel any in-flight turn and tear down the session without taking the lock.
+
+        Used when a turn holds the lock (e.g. ``/new`` mid-turn); pops the turn,
+        session, and lock, then closes the thread, suppressing all errors.
+        """
         turn = self._active_turns.pop(chat_id, None)
         if turn is not None:
             with contextlib.suppress(Exception):
@@ -719,6 +783,7 @@ class CodexAgentBackend:
                     await result
 
     async def close_all(self) -> None:
+        """Cancel the idle-GC task, reset every thread, and close the runtime (shutdown)."""
         if self._gc_task is not None and not self._gc_task.done():
             self._gc_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -733,6 +798,7 @@ class CodexAgentBackend:
             self._codex = None
 
     def _thread_id(self, thread: Any) -> str | None:
+        """Extract the thread id from a thread attr or dict key; None if absent."""
         for attr in ("id", "thread_id", "threadId"):
             value = getattr(thread, attr, None)
             if isinstance(value, str):

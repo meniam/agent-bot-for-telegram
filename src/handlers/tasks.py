@@ -36,6 +36,7 @@ from .context import BotContext
 
 
 def _fmt_line(task: Task) -> str:
+    """Format one task as a multi-line list/detail entry."""
     name = task.name or (task.prompt or task.script or task.id)[:32]
     nxt = task.next_run_at.strftime("%Y-%m-%d %H:%M") if task.next_run_at else "—"
     flags = f"{task.kind}/{task.scope}"
@@ -53,7 +54,7 @@ def _cell(text: str) -> str:
 
 
 def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
-    """A Markdown table of the given tasks (caller filters archived ones)."""
+    """Render the given tasks as a Markdown table (caller filters archived)."""
     tr = ctx.tr
     state_label = {
         "scheduled": tr.t("task_state_scheduled"),
@@ -102,6 +103,7 @@ async def task_cmd(
     chat_id: int,
     **_: object,
 ) -> None:
+    """Dispatch a `/task <subcommand>` (add/list/show/pause/resume/run/rm)."""
     if ctx.task_service is None:
         await send_md(message, ctx.tr.t("task_disabled"))
         return
@@ -169,6 +171,7 @@ async def _add(
     *,
     cl: logging.Logger,
 ) -> None:
+    """Create a task from the `add` argument string and confirm it."""
     assert ctx.task_service is not None
     try:
         parsed = _parse_add(rest)
@@ -203,6 +206,7 @@ async def _add(
 
 
 async def _list(ctx: BotContext, message: Message, chat_id: int) -> None:
+    """Reply with the caller's visible tasks as a line list."""
     assert ctx.task_service is not None
     tasks = ctx.task_service.list(chat_id)
     if not tasks:
@@ -222,6 +226,7 @@ async def _by_id(
     *,
     cl: logging.Logger,
 ) -> None:
+    """Apply an id-targeted action (show/pause/resume/run/rm) and confirm."""
     assert ctx.task_service is not None
     try:
         task = await ctx.task_service.act(chat_id, action, task_id)
@@ -244,6 +249,7 @@ async def _by_id(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the `/tasks` and `/task` command handlers on ``dp``."""
     dp.message.register(tasks_cmd, Command("tasks"))
     dp.message.register(task_cmd, Command("task"))
 

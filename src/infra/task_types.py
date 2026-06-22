@@ -187,6 +187,7 @@ def parse_schedule(text: str, *, now: datetime | None = None) -> TaskSchedule:
 
 
 def _validate_cron(expr: str) -> None:
+    """Raise ``ValueError`` unless ``expr`` is a valid cron expression."""
     try:
         from croniter import croniter
     except ImportError as e:  # pragma: no cover - croniter is a hard dependency

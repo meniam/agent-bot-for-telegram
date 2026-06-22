@@ -29,16 +29,21 @@ _FENCE_RE = re.compile(
 
 @dataclass(slots=True, frozen=True)
 class RequestedFile:
+    """One file the agent asked to send, with an optional caption."""
+
     path: str
     caption: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
 class FileDelivery:
+    """A validated batch of files requested in a `send_files` payload."""
+
     files: tuple[RequestedFile, ...]
 
 
 def parse_file_delivery(text: str) -> FileDelivery | None:
+    """Return a delivery when the whole answer is a `send_files` payload."""
     raw = _extract_payload(text)
     if raw is None:
         return None
@@ -73,6 +78,11 @@ async def send_file_delivery(
     t: Translator,
     cl: logging.Logger,
 ) -> None:
+    """Send each requested file as a Telegram document, reporting failures.
+
+    Paths are confined to `roots`; oversized, missing, non-file, or
+    out-of-root entries are skipped with a translated error message.
+    """
     allowed_roots = [root.resolve() for root in roots if root.exists()]
     if not allowed_roots:
         await send_md(message, t.t("file_delivery_no_roots"))
@@ -116,6 +126,7 @@ async def send_file_delivery(
 
 
 def _extract_payload(text: str) -> str | None:
+    """Pull the JSON body from a fenced block or a bare `{...}` answer."""
     stripped = text.strip()
     match = _FENCE_RE.search(stripped)
     if match is not None:
@@ -126,6 +137,7 @@ def _extract_payload(text: str) -> str | None:
 
 
 def _resolve_requested_path(path_text: str, roots: list[Path]) -> Path | None:
+    """Resolve a requested path, returning it only if it stays within a root."""
     raw_path = Path(path_text).expanduser()
     candidates = (
         [raw_path]
@@ -141,6 +153,7 @@ def _resolve_requested_path(path_text: str, roots: list[Path]) -> Path | None:
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
+    """Return whether `path` lies under `root`."""
     try:
         path.relative_to(root)
         return True
