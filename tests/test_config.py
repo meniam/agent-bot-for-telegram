@@ -12,18 +12,21 @@ from src.config import BotConfig, load
 
 
 def _write(tmp_path: Path, payload: dict[str, Any]) -> Path:
+    """Write a JSON config file and return its path."""
     p = tmp_path / "config.json"
     p.write_text(json.dumps(payload), encoding="utf-8")
     return p
 
 
 def _write_yaml(tmp_path: Path, text: str, name: str = "config.yaml") -> Path:
+    """Write a YAML config file and return its path."""
     p = tmp_path / name
     p.write_text(text, encoding="utf-8")
     return p
 
 
 def test_multi_bot_dict(tmp_path: Path) -> None:
+    """Verify a multi-bot dict config loads each bot under its key."""
     p = _write(
         tmp_path,
         {
@@ -37,6 +40,7 @@ def test_multi_bot_dict(tmp_path: Path) -> None:
 
 
 def test_yaml_config_loads(tmp_path: Path) -> None:
+    """Verify a YAML config loads bots, chat ids, and multiline prompts."""
     p = _write_yaml(
         tmp_path,
         """
@@ -61,6 +65,7 @@ def test_yaml_config_loads(tmp_path: Path) -> None:
 
 
 def test_yml_config_loads(tmp_path: Path) -> None:
+    """Verify a config with the .yml extension loads."""
     p = _write_yaml(
         tmp_path,
         """
@@ -76,6 +81,7 @@ def test_yml_config_loads(tmp_path: Path) -> None:
 
 
 def test_yaml_nested_sections_load(tmp_path: Path) -> None:
+    """Verify nested gateway, agent, and providers sections flatten onto the config."""
     p = _write_yaml(
         tmp_path,
         """
@@ -133,6 +139,7 @@ def test_yaml_nested_sections_load(tmp_path: Path) -> None:
 
 
 def test_yaml_nested_sections_reject_conflicts(tmp_path: Path) -> None:
+    """Verify a key set both directly and in a section is rejected."""
     p = _write_yaml(
         tmp_path,
         """
@@ -151,6 +158,7 @@ def test_yaml_nested_sections_reject_conflicts(tmp_path: Path) -> None:
 def test_default_load_prefers_yaml_over_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Verify the default loader prefers a YAML config over a JSON one."""
     yaml_path = _write_yaml(
         tmp_path,
         """
@@ -171,6 +179,7 @@ def test_default_load_prefers_yaml_over_json(
 def test_default_load_falls_back_to_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Verify the default loader falls back to JSON when no YAML exists."""
     yaml_path = tmp_path / "config.yaml"
     json_path = _write(tmp_path, {"beta": {"telegram_bot_token": "2:def"}})
     monkeypatch.setattr(
@@ -183,12 +192,14 @@ def test_default_load_falls_back_to_json(
 
 
 def test_flat_legacy_format_wraps_as_default(tmp_path: Path) -> None:
+    """Verify a flat legacy config wraps into a single 'default' bot."""
     p = _write(tmp_path, {"telegram_bot_token": "1:abc"})
     bots = load(p)
     assert list(bots) == ["default"]
 
 
 def test_placeholder_token_rejected(tmp_path: Path) -> None:
+    """Verify a placeholder bot token is rejected."""
     p = _write(tmp_path, {"alpha": {"telegram_bot_token": "put-it-here"}})
     with pytest.raises(ValueError, match="telegram_bot_token"):
         load(p)
@@ -197,6 +208,7 @@ def test_placeholder_token_rejected(tmp_path: Path) -> None:
 def test_env_fallback_for_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Verify a missing token falls back to the per-bot environment variable."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN_ALPHA", "9:zzz")
     p = _write(tmp_path, {"alpha": {}})
     bots = load(p)
@@ -204,6 +216,7 @@ def test_env_fallback_for_token(
 
 
 def test_acl_defaults_are_fail_closed() -> None:
+    """Verify ACL and provider defaults are fail-closed."""
     cfg = BotConfig.model_validate(
         {"name": "x", "telegram_bot_token": "1:abc"}
     )
@@ -214,6 +227,7 @@ def test_acl_defaults_are_fail_closed() -> None:
 
 
 def test_codex_agent_config_accepted() -> None:
+    """Verify a valid Codex agent config is accepted."""
     cfg = BotConfig.model_validate(
         {
             "name": "x",
@@ -230,6 +244,7 @@ def test_codex_agent_config_accepted() -> None:
 
 
 def test_pi_agent_config_accepted() -> None:
+    """Verify a valid PI agent config is accepted."""
     cfg = BotConfig.model_validate(
         {
             "name": "x",
@@ -257,6 +272,7 @@ def test_pi_agent_config_accepted() -> None:
     ],
 )
 def test_invalid_agent_config_rejected(field: str, value: str) -> None:
+    """Verify invalid agent enum values are rejected."""
     with pytest.raises(ValidationError):
         BotConfig.model_validate(
             {"name": "x", "telegram_bot_token": "1:abc", field: value}
@@ -264,6 +280,7 @@ def test_invalid_agent_config_rejected(field: str, value: str) -> None:
 
 
 def test_allowed_chat_ids_must_be_list(tmp_path: Path) -> None:
+    """Verify a non-list allowed_chat_ids is rejected."""
     p = _write(
         tmp_path,
         {"alpha": {"telegram_bot_token": "1:abc", "allowed_chat_ids": "not-list"}},
@@ -273,6 +290,7 @@ def test_allowed_chat_ids_must_be_list(tmp_path: Path) -> None:
 
 
 def test_blacklist_parses_integers(tmp_path: Path) -> None:
+    """Verify blacklist_chat_ids coerces string entries to integers."""
     p = _write(
         tmp_path,
         {
@@ -287,6 +305,7 @@ def test_blacklist_parses_integers(tmp_path: Path) -> None:
 
 
 def test_extra_fields_rejected() -> None:
+    """Verify unknown config fields are rejected."""
     with pytest.raises(ValidationError):
         BotConfig.model_validate(
             {"name": "x", "telegram_bot_token": "1:abc", "garbage": True}
@@ -294,6 +313,7 @@ def test_extra_fields_rejected() -> None:
 
 
 def test_tasks_section_loads(tmp_path: Path) -> None:
+    """Verify the tasks section loads and resolves directories to absolute paths."""
     p = _write_yaml(
         tmp_path,
         """
@@ -326,6 +346,7 @@ def test_tasks_section_loads(tmp_path: Path) -> None:
 
 
 def test_tasks_absent_defaults_disabled(tmp_path: Path) -> None:
+    """Verify tasks default to disabled when no tasks section is present."""
     p = _write(tmp_path, {"alpha": {"telegram_bot_token": "1:abc"}})
     cfg = load(p)["alpha"]
     assert cfg.tasks_enabled is False
@@ -335,6 +356,7 @@ def test_tasks_absent_defaults_disabled(tmp_path: Path) -> None:
 
 
 def test_is_admin_fail_closed() -> None:
+    """Verify is_admin matches only configured admin ids and is fail-closed."""
     cfg = BotConfig.model_validate(
         {"name": "x", "telegram_bot_token": "1:abc", "admin_chat_ids": [7]}
     )

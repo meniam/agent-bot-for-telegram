@@ -1,3 +1,13 @@
+"""Live draft streaming of agent replies to Telegram.
+
+`DraftStreamer` consumes the `StreamChunk` async iterator from a backend's
+``ask_stream`` and pushes accumulated text (plus an optional thinking preview)
+to Telegram via ``sendRichMessageDraft`` at most every ``draft_interval_sec``.
+Drafts are ephemeral — the final reply is sent separately by the caller. Text
+is accumulated locally and previewed from the tail to bound payload size and
+avoid O(N²) re-sends.
+"""
+
 import html as _html
 import itertools
 import logging
@@ -55,16 +65,23 @@ class DraftStreamer:
         interval_sec: float = DEFAULT_DRAFT_INTERVAL,
         convert: Callable[[str], str] | None = None,
     ) -> None:
+        """Bind the bot, the minimum draft interval, and an HTML-conversion callable."""
         self._bot = bot
         self._interval = interval_sec
         self._convert = convert or _html.escape
 
     def __repr__(self) -> str:
+        """Return a debug representation showing the draft interval."""
         return f"DraftStreamer(interval={self._interval})"
 
     async def stream(
         self, chat_id: int, chunks: AsyncIterator[StreamChunk]
     ) -> str:
+        """Consume reply chunks, push throttled drafts, and return the full text.
+
+        Draft sends are best-effort: a failed ``sendRichMessageDraft`` is logged
+        and skipped. Returns the accumulated text (thinking tokens excluded).
+        """
         draft_id = next(_draft_seq) % 2_147_483_647
         last_sent = 0.0
         last_preview = ""

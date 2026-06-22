@@ -16,6 +16,7 @@ async def questionnaire_callback(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Handle a `qq:` questionnaire tap; fire an agent turn once submitted."""
     agent_prompt = await on_callback(callback, ctx.tr)
     if agent_prompt is None:
         return
@@ -27,4 +28,5 @@ async def questionnaire_callback(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the questionnaire callback handler on ``dp``."""
     dp.callback_query.register(questionnaire_callback, F.data.startswith("qq:"))

@@ -41,6 +41,8 @@ _MAX_COMMAND_FILE_BYTES = 1 * 1024 * 1024
 
 @dataclass(frozen=True)
 class CommandDef:
+    """A user-defined slash command parsed from one `.md` file."""
+
     name: str
     description: str
     body: str

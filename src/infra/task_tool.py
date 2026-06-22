@@ -60,6 +60,7 @@ _TASK_INPUT_SCHEMA: dict[str, Any] = {
 
 
 def _fmt_task(task: Task) -> dict[str, Any]:
+    """Render a task as the compact JSON-safe dict returned to the agent."""
     return {
         "id": task.id,
         "name": task.name or None,
@@ -72,11 +73,13 @@ def _fmt_task(task: Task) -> dict[str, Any]:
 
 
 def _ok(payload: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a success ``payload`` as an MCP text-content tool result."""
     text = json.dumps({"success": True, **payload}, ensure_ascii=False)
     return {"content": [{"type": "text", "text": text}]}
 
 
 def _err(message: str) -> dict[str, Any]:
+    """Wrap an error ``message`` as an MCP error tool result."""
     text = json.dumps({"success": False, "error": message}, ensure_ascii=False)
     return {"content": [{"type": "text", "text": text}], "is_error": True}
 
@@ -84,9 +87,10 @@ def _err(message: str) -> dict[str, Any]:
 def make_task_handler(
     chat_id: int, service: TaskService
 ) -> "Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]":
-    """The bare async tool handler bound to ``chat_id`` (unit-testable)."""
+    """Build the bare async tool handler bound to ``chat_id`` (unit-testable)."""
 
     async def handle(args: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch one `task` tool call to the service and shape the result."""
         action = str(args.get("action", "")).strip().lower()
         try:
             if action == "create":
@@ -104,7 +108,7 @@ def make_task_handler(
                     {"task": _fmt_task(created), "message": f"Task {created.id} scheduled."}
                 )
             if action == "list":
-                tasks = service.list(chat_id)
+                tasks = await service.list(chat_id)
                 return _ok({"tasks": [_fmt_task(t) for t in tasks]})
             if action in ("show", "pause", "resume", "run", "rm"):
                 task_id = str(args.get("task_id") or "").strip()
@@ -126,7 +130,7 @@ def make_task_handler(
 
 
 def build_task_server(chat_id: int, service: TaskService) -> McpSdkServerConfig:
-    """An in-process MCP server exposing the `task` tool bound to ``chat_id``."""
+    """Build an in-process MCP server exposing the `task` tool for ``chat_id``."""
     task_tool = tool(
         "task",
         "Schedule and manage the user's reminders / scheduled tasks.",

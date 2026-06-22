@@ -1,7 +1,6 @@
-"""Generic text handler — the catch-all `F.text` registered after every
-exact-command filter.
+"""Generic text handler — the catch-all `F.text`.
 
-Three branches:
+Registered after every exact-command filter. Three branches:
 1. A pending `ExitPlanMode` prompt swallows the text as rejection-with-
    feedback (gate consumes it; we do NOT also fire an agent turn).
 2. `/plan` was armed and waiting — this text becomes the plan prompt.
@@ -22,6 +21,7 @@ from .context import BotContext
 async def handle_text(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Route a plain text message: plan rejection, plan prompt, or agent turn."""
     # If a plan-approval prompt is on screen, treat the text as
     # rejection-with-feedback for ExitPlanMode and do NOT also fire a
     # fresh agent turn — the existing turn is still running and will
@@ -58,4 +58,5 @@ async def handle_text(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the catch-all text handler on ``dp``."""
     dp.message.register(handle_text, F.text)

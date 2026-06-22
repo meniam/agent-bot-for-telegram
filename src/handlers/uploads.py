@@ -5,8 +5,10 @@ Each file is downloaded into the configured uploads_dir, queued on the
 debounced for an album).
 """
 
+import asyncio
 import contextlib
 import logging
+from typing import BinaryIO, cast
 
 from aiogram import Dispatcher, F
 from aiogram.types import Message
@@ -47,10 +49,17 @@ async def _save_upload(
             ),
         )
         return None
-    path = ctx.uploads.build_path(message.chat.id, file_id, original_name)
+    # build_path creates the per-chat dir (mkdir) — keep that off the event loop.
+    path = await asyncio.to_thread(
+        ctx.uploads.build_path, message.chat.id, file_id, original_name
+    )
     try:
-        with path.open("wb") as f:
+        # Open/close off the event loop; the download itself streams async.
+        f = cast("BinaryIO", await asyncio.to_thread(path.open, "wb"))
+        try:
             await ctx.bot.download(file_id, destination=f)
+        finally:
+            await asyncio.to_thread(f.close)
     except Exception as e:
         ctx.glog.exception("[%s] upload download failed", ctx.cfg.name)
         cl.exception("upload download failed: %s", e)
@@ -75,6 +84,7 @@ async def _fire_for_upload(
     caption = (message.caption or "").strip()
 
     async def _on_fire(m: Message, cap: str) -> None:
+        """React to the (debounced) message and run the agent turn."""
         await react_to(ctx, m, cap)
         await reply_with_agent(ctx, m, cap, cl)
 
@@ -84,6 +94,7 @@ async def _fire_for_upload(
 async def handle_photo(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save the largest photo size, queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -118,6 +129,7 @@ async def handle_photo(
 async def handle_document(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save an uploaded document, queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -153,6 +165,7 @@ async def handle_document(
 async def handle_sticker(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Save a sticker (image or binary by type), queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:
         await send_md(message, ctx.tr.t("upload_disabled"))
@@ -193,6 +206,7 @@ async def handle_sticker(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the photo, document, and sticker handlers on ``dp``."""
     dp.message.register(handle_photo, F.photo)
     dp.message.register(handle_document, F.document)
     dp.message.register(handle_sticker, F.sticker)

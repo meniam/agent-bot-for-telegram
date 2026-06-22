@@ -28,6 +28,7 @@ _VOICE_SPOOL_MAX_BYTES = 4 * 1024 * 1024
 async def handle_voice(
     message: Message, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Transcribe a voice/audio message and route the text to plan or agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     media = message.voice or message.audio
     if media is None:
@@ -112,4 +113,5 @@ async def handle_voice(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the voice/audio handler on ``dp``."""
     dp.message.register(handle_voice, F.voice | F.audio)

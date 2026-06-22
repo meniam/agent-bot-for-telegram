@@ -1,4 +1,4 @@
-"""Two helpers used by every handler that drives an agent turn:
+"""Two helpers used by every handler that drives an agent turn.
 
 - `react_to` — set an emoji reaction on the user's message.
 - `reply_with_agent` — drain pending uploads, stream the agent's response
@@ -25,6 +25,7 @@ _bg_tasks: set[asyncio.Task[None]] = set()
 
 
 def _user_context_prefix(user: User | None, chat_id: int) -> str:
+    """Build a bracketed identity line prepended to a new session's prompt."""
     if user is None:
         return f"[Telegram user: chat_id={chat_id}]\n\n"
     parts = [f"chat_id={chat_id}"]
@@ -39,6 +40,7 @@ def _user_context_prefix(user: User | None, chat_id: int) -> str:
 
 
 async def react_to(ctx: BotContext, message: Message, text: str) -> None:
+    """Set an emoji reaction on the user's message, swallowing failures."""
     emoji = ctx.reaction_picker.pick(text or "")
     try:
         await ctx.bot.set_message_reaction(
@@ -54,18 +56,19 @@ async def _name_session_in_background(
     ctx: BotContext, chat_id: int, user_text: str, cl: logging.Logger
 ) -> None:
     """If the current session is still unnamed, ask the LLM for a title."""
-    session = ctx.agent.current_session(chat_id)
+    session = await ctx.agent.current_session(chat_id)
     if session is None or session.auto_titled or not user_text.strip():
         return
 
     async def _run() -> None:
+        """Generate and store the session title in the background."""
         try:
             title = await ctx.agent.generate_title(user_text)
         except Exception as e:
             cl.warning("session title generation failed: %s", e)
             return
         if title:
-            ctx.sessions.set_title(chat_id, session.id, title)
+            await ctx.sessions.set_title(chat_id, session.id, title)
             cl.info("session %s titled: %s", session.id, title)
 
     task = asyncio.create_task(_run())
@@ -76,6 +79,18 @@ async def _name_session_in_background(
 async def reply_with_agent(
     ctx: BotContext, message: Message, prompt: str, cl: logging.Logger
 ) -> None:
+    """Run one agent turn for a chat message and deliver the reply.
+
+    The shared pipeline behind text, voice, custom commands, and `/plan`. It:
+    injects a user-context prefix on a brand-new session; drains pending
+    uploads into the prompt; streams the turn through `DraftStreamer` under an
+    `agent_timeout_sec` deadline; then renders the final answer. Each failure
+    mode (timeout, `AgentTurnReset`, `AgentEventStreamTimeout`, any other
+    exception) is logged and turned into a user-facing message or a silent
+    return. A final answer may instead be a `bot_files` delivery or a
+    `bot_questionnaire` prompt, which are dispatched here. Session titling runs
+    as a fire-and-forget background task. Returns nothing — all output is I/O.
+    """
     user_text = prompt
     if not ctx.agent.has_session(message.chat.id):
         prefix = _user_context_prefix(message.from_user, message.chat.id)

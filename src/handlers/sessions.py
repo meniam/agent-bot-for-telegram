@@ -1,5 +1,6 @@
-"""`/sess` — paged, tap-to-switch session list, or `/sess <n>` to switch by
-ordinal (created order) for keyboard-less clients.
+"""`/sess` — paged, tap-to-switch session list.
+
+`/sess <n>` switches by ordinal (created order) for keyboard-less clients.
 
 Sessions are the bot-level meta layer over the SDK's persisted conversation
 history (see `infra/session_store.py`). `/new` (in `basic.py`) starts a fresh
@@ -40,21 +41,22 @@ _PAGE_SIZE = 15
 
 
 def _short(title: str) -> str:
+    """Truncate ``title`` to the button width, appending an ellipsis if cut."""
     return title if len(title) <= _BTN_TITLE_MAX else title[: _BTN_TITLE_MAX - 1] + "…"
 
 
-def _build_view(
+async def _build_view(
     ctx: BotContext, chat_id: int, *, delete_mode: bool, page: int
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Return (header_text, keyboard) for the list at a given mode/page."""
-    sessions = ctx.sessions.list_by_recency(chat_id)
+    sessions = await ctx.sessions.list_by_recency(chat_id)
     if not sessions:
         return ctx.tr.t("sess_list_empty"), None
 
     pages = max(1, (len(sessions) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, pages - 1))
     window = sessions[page * _PAGE_SIZE : (page + 1) * _PAGE_SIZE]
-    current_id = ctx.sessions.current_id(chat_id)
+    current_id = await ctx.sessions.current_id(chat_id)
     marker = ctx.tr.t("sess_current_marker")
 
     rows: list[list[InlineKeyboardButton]] = []
@@ -113,6 +115,7 @@ def _build_view(
 
 
 def _confirm_keyboard(ctx: BotContext, sid: str, page: int) -> InlineKeyboardMarkup:
+    """Build the yes/no keyboard confirming deletion of session ``sid``."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -130,9 +133,10 @@ def _confirm_keyboard(ctx: BotContext, sid: str, page: int) -> InlineKeyboardMar
 async def _rerender(
     ctx: BotContext, callback: CallbackQuery, chat_id: int, *, delete_mode: bool, page: int
 ) -> None:
+    """Rebuild and edit the session-list message in place for the given page."""
     if not isinstance(callback.message, Message):
         return
-    text, kb = _build_view(ctx, chat_id, delete_mode=delete_mode, page=page)
+    text, kb = await _build_view(ctx, chat_id, delete_mode=delete_mode, page=page)
     with contextlib.suppress(Exception):
         if kb is None:
             await callback.message.edit_text(text)
@@ -147,13 +151,14 @@ async def sessions_cmd(
     cl: logging.Logger,
     **_: object,
 ) -> None:
+    """Switch by ordinal for `/sess <n>`, or show the paged session list."""
     chat_id = message.chat.id
     arg = (command.args or "").strip()
     if arg:
         # `/sess <n>` — ordinal in created order, for keyboard-less clients.
         await _switch_by_ordinal(ctx, message, chat_id, arg, cl)
         return
-    text, kb = _build_view(ctx, chat_id, delete_mode=False, page=0)
+    text, kb = await _build_view(ctx, chat_id, delete_mode=False, page=0)
     if kb is None:
         await send_md(message, text)
         return
@@ -163,12 +168,13 @@ async def sessions_cmd(
 async def _switch_by_ordinal(
     ctx: BotContext, message: Message, chat_id: int, arg: str, cl: logging.Logger
 ) -> None:
+    """Switch to the session at ``arg`` (created-order ordinal), or report error."""
     try:
         ordinal = int(arg)
     except ValueError:
         await send_md(message, ctx.tr.t("sess_usage"))
         return
-    target = ctx.sessions.get_by_ordinal(chat_id, ordinal)
+    target = await ctx.sessions.get_by_ordinal(chat_id, ordinal)
     session = await ctx.agent.switch_session(chat_id, target.id) if target else None
     if session is None:
         cl.info("/sess switch failed: ordinal=%s", ordinal)
@@ -183,6 +189,7 @@ async def _switch_by_ordinal(
 async def sessions_switch_callback(
     callback: CallbackQuery, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Switch to the tapped session (`sess:<id>`) and re-render the list."""
     chat_id = callback.message.chat.id if callback.message else None
     sid = (callback.data or "").split(":", 1)[1] if ":" in (callback.data or "") else ""
     if chat_id is None:
@@ -224,7 +231,7 @@ async def sessions_ask_delete_callback(
         await callback.answer()
         return
     sid, page = parts[1], (int(parts[2]) if parts[2].isdigit() else 0)
-    target = ctx.sessions.get_by_id(chat_id, sid)
+    target = await ctx.sessions.get_by_id(chat_id, sid)
     if target is None:
         await callback.answer(ctx.tr.t("sess_not_found", ordinal="?"), show_alert=True)
         return
@@ -240,6 +247,7 @@ async def sessions_ask_delete_callback(
 async def sessions_confirm_delete_callback(
     callback: CallbackQuery, ctx: BotContext, cl: logging.Logger, **_: object
 ) -> None:
+    """Delete the confirmed session (`sessok:<id>`) and return to the list."""
     chat_id = callback.message.chat.id if callback.message else None
     sid = (callback.data or "").split(":", 1)[1] if ":" in (callback.data or "") else ""
     if chat_id is None:
@@ -257,10 +265,12 @@ async def sessions_confirm_delete_callback(
 
 
 async def sessions_noop_callback(callback: CallbackQuery, **_: object) -> None:
+    """Acknowledge the inert page-indicator tap (`sessnoop`)."""
     await callback.answer()
 
 
 def register(dp: Dispatcher) -> None:
+    """Register the `/sess` command and its callback handlers on ``dp``."""
     dp.message.register(sessions_cmd, Command("sess"))
     dp.callback_query.register(sessions_switch_callback, F.data.startswith("sess:"))
     dp.callback_query.register(sessions_nav_callback, F.data.startswith("sessnav:"))

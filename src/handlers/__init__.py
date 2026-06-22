@@ -26,6 +26,11 @@ def register_all(
     dp: Dispatcher,
     custom_commands: list[CommandDef],
 ) -> None:
+    """Register every handler on ``dp`` in filter-priority order.
+
+    Exact ``Command`` filters (built-in and user-defined) are registered
+    before the greedy ``F.text``/voice/upload catch-alls.
+    """
     # Exact Command(...) filters — order between these is irrelevant.
     selectors.register(dp)
     basic.register(dp)

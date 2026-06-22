@@ -11,6 +11,7 @@ from src.services.upload_store import (
 
 
 def test_safe_filename_strips_traversal() -> None:
+    """Sanitizing a filename strips path separators."""
     # Slashes are replaced with `_`; the dot in `..` is in the allowlist
     # (legitimate for extensions). What matters is the result is a single
     # path component with no separators.
@@ -21,6 +22,7 @@ def test_safe_filename_strips_traversal() -> None:
 
 
 def test_safe_filename_empty_default() -> None:
+    """An empty name defaults to `file`; all-slash input has no separators."""
     assert _safe_filename("") == "file"
     # All-slash input → all chars become `_`; result still has no separators.
     out = _safe_filename("///")
@@ -28,6 +30,7 @@ def test_safe_filename_empty_default() -> None:
 
 
 def test_build_path_contains_no_traversal(tmp_path: Path) -> None:
+    """A built upload path stays inside the chat directory."""
     store = UploadStore(tmp_path)
     p = store.build_path(123, "fileidABCDEFGH", "../evil.txt")
     assert tmp_path in p.parents
@@ -36,6 +39,7 @@ def test_build_path_contains_no_traversal(tmp_path: Path) -> None:
 
 
 def test_pending_queue_drains(tmp_path: Path) -> None:
+    """Pending uploads can be queued and drained per chat."""
     store = UploadStore(tmp_path)
     item = PendingFile(path=tmp_path / "x.bin", kind="document", name="x.bin")
     store.add_pending(7, item)
@@ -46,6 +50,7 @@ def test_pending_queue_drains(tmp_path: Path) -> None:
 
 
 def test_format_attachment_prompt_includes_paths(tmp_path: Path) -> None:
+    """The attachment prompt lists each file and the user text."""
     items = [
         PendingFile(path=tmp_path / "a.jpg", kind="image", name="a.jpg"),
         PendingFile(path=tmp_path / "b.pdf", kind="document", name="b.pdf"),
@@ -57,6 +62,7 @@ def test_format_attachment_prompt_includes_paths(tmp_path: Path) -> None:
 
 
 def test_format_attachment_prompt_no_user_text(tmp_path: Path) -> None:
+    """With no user text, the prompt omits the user message section."""
     items = [PendingFile(path=tmp_path / "a.jpg", kind="image", name="a.jpg")]
     out = format_attachment_prompt(items, "")
     assert "User message" not in out

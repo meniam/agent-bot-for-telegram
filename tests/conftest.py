@@ -1,3 +1,5 @@
+"""Shared pytest configuration: make `src.*` importable from the repo root."""
+
 import sys
 from pathlib import Path
 

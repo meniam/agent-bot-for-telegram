@@ -33,6 +33,13 @@ async def handle(
     chat_id: int,
     tool_input: dict[str, Any],
 ) -> PermissionResultAllow | PermissionResultDeny:
+    """Render the plan, post Approve/Reject, and await the verdict.
+
+    Stores the pending future in ``gate._plan_pending[chat_id]`` so a button tap
+    (`on_callback`) or a freeform text reply (`consume_text`) can resolve it.
+    Approve → Allow; reject/timeout → Deny whose message carries the user's
+    feedback so the model revises and calls ExitPlanMode again.
+    """
     t = gate._t
     plan = str(tool_input.get("plan", "") or "").strip()
     log.info(
@@ -134,6 +141,10 @@ async def handle(
 async def on_callback(
     gate: TelegramInteractionGate, callback: CallbackQuery
 ) -> None:
+    """Resolve a `plan:` Approve/Reject tap by setting the pending future.
+
+    No-op for stale callbacks (deletes the orphaned prompt).
+    """
     t = gate._t
     data = callback.data or ""
     if not data.startswith("plan:"):
@@ -177,6 +188,12 @@ async def on_callback(
 def consume_text(
     gate: TelegramInteractionGate, chat_id: int, text: str
 ) -> bool:
+    """Resolve a pending plan prompt with a freeform text reply as rejection.
+
+    Returns True if a pending, unresolved plan future existed and the text was
+    consumed as rejection-with-feedback; False otherwise (caller treats the
+    text as a normal message).
+    """
     entry = gate._plan_pending.get(chat_id)
     if entry is None:
         return False

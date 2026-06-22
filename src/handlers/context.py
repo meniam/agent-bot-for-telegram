@@ -31,6 +31,14 @@ from ..ui.tool_status import ToolStatusMirror
 
 @dataclass(slots=True, frozen=True)
 class BotContext:
+    """Per-bot dependency aggregate injected into every handler by middleware.
+
+    Built once in `bot.run_bot`; frozen so handlers cannot mutate shared wiring.
+    The optional fields are ``None`` when their feature is disabled in config:
+    ``transcriber`` (no ``groq_api_key``), ``uploads`` (no ``uploads_dir``),
+    ``tasks`` / ``task_service`` (tasks disabled or no ``tasks_dir``).
+    """
+
     cfg: BotConfig
     bot: Bot
     tr: Translator

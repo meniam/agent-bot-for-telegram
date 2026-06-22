@@ -12,15 +12,19 @@ from src.infra.task_types import Task, TaskSchedule
 
 
 class _FakeBot:
+    """Records the injected delivery callback's calls."""
+
     def __init__(self) -> None:
+        """Initialize an empty record of delivered messages."""
         self.sent: list[tuple[int, str]] = []
 
-    async def send_rich_message(self, *, chat_id: int, rich_message: object) -> None:
-        # send_md_to_chat converts then calls this; record the chat.
-        self.sent.append((chat_id, type(rich_message).__name__))
+    async def deliver(self, chat_id: int, output: str) -> None:
+        """Record a delivery to the given chat."""
+        self.sent.append((chat_id, output))
 
 
 def _cfg(tmp_path: Path, **over: object) -> BotConfig:
+    """Build a BotConfig with task dirs under tmp_path and the given overrides."""
     base = {
         "name": "t",
         "telegram_bot_token": "1:abc",
@@ -36,10 +40,11 @@ def _cfg(tmp_path: Path, **over: object) -> BotConfig:
 
 
 def _runner(tmp_path: Path, bot: _FakeBot, cfg: BotConfig) -> TaskRunner:
+    """Build a TaskRunner wired to a fresh store and the fake bot."""
     store = TaskStore(tmp_path / "tasks")
     (tmp_path / "scripts").mkdir(exist_ok=True)
     return TaskRunner(
-        bot=bot,  # type: ignore[arg-type]
+        deliver=bot.deliver,
         cfg=cfg,
         store=store,
         agent=object(),  # type: ignore[arg-type]
@@ -49,6 +54,7 @@ def _runner(tmp_path: Path, bot: _FakeBot, cfg: BotConfig) -> TaskRunner:
 
 
 def _script_task(name: str, chat_id: int = 10, scope: str = "user") -> Task:
+    """Build a one-shot script task for the given name, chat, and scope."""
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
@@ -60,11 +66,13 @@ def _script_task(name: str, chat_id: int = 10, scope: str = "user") -> Task:
 
 
 def test_broadcast_targets_excludes_blacklist(tmp_path: Path) -> None:
+    """Broadcast targets exclude blacklisted chats."""
     cfg = _cfg(tmp_path, allowed_chat_ids=(10, 20, 30), blacklist_chat_ids=(20,))
     assert broadcast_targets(cfg) == [10, 30]
 
 
 async def test_run_script_captures_stdout(tmp_path: Path) -> None:
+    """A successful script captures stdout and delivers to the owner."""
     cfg = _cfg(tmp_path)
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
@@ -78,6 +86,7 @@ async def test_run_script_captures_stdout(tmp_path: Path) -> None:
 
 
 async def test_run_script_nonzero_exit_is_error(tmp_path: Path) -> None:
+    """A non-zero exit marks the run as error and delivers nothing."""
     cfg = _cfg(tmp_path)
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
@@ -91,6 +100,7 @@ async def test_run_script_nonzero_exit_is_error(tmp_path: Path) -> None:
 
 
 async def test_script_path_traversal_rejected(tmp_path: Path) -> None:
+    """A script path escaping the scripts dir is rejected."""
     cfg = _cfg(tmp_path)
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
@@ -100,6 +110,7 @@ async def test_script_path_traversal_rejected(tmp_path: Path) -> None:
 
 
 async def test_global_script_broadcasts(tmp_path: Path) -> None:
+    """A global script delivers to all allowed chats."""
     cfg = _cfg(tmp_path, allowed_chat_ids=(10, 20))
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
@@ -109,6 +120,7 @@ async def test_global_script_broadcasts(tmp_path: Path) -> None:
 
 
 async def test_history_written(tmp_path: Path) -> None:
+    """A completed run is written to the task history."""
     cfg = _cfg(tmp_path)
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
@@ -116,6 +128,6 @@ async def test_history_written(tmp_path: Path) -> None:
     task = _script_task("h.py")
     await runner.run(task)
     store = TaskStore(tmp_path / "tasks")
-    runs = store.list_history(task.id)
+    runs = await store.list_history(task.id)
     assert len(runs) == 1
     assert runs[0].status == "ok"

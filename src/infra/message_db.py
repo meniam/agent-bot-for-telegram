@@ -129,6 +129,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+    # NORMAL is durable under WAL (only loses the last txn on power loss, never
+    # corrupts) and far cheaper than FULL; busy_timeout lets a writer wait out a
+    # concurrent writer instead of failing fast with SQLITE_BUSY.
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(SCHEMA)
     conn.commit()
     _ensure_fts(conn)
@@ -163,11 +168,18 @@ class SqliteChatLogHandler(logging.Handler):
         db_path: Path,
         session_of: "Callable[[], Session | None] | None" = None,
     ) -> None:
+        """Open ``db_path`` and resolve the current session via ``session_of``."""
         super().__init__()
         self._session_of = session_of
         self._conn = connect(db_path)
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Write one log record as a ``messages`` row, upserting its session.
+
+        Reads ``role``/``tool`` off the record, resolves and denormalizes the
+        current session, and commits. Errors route through ``handleError`` so a
+        write failure never propagates into the logging call site.
+        """
         try:
             role = getattr(record, "role", None) or ROLE_SYSTEM
             tool = getattr(record, "tool", None)
@@ -207,6 +219,7 @@ class SqliteChatLogHandler(logging.Handler):
             self.handleError(record)
 
     def close(self) -> None:
+        """Close the SQLite connection, then the base handler."""
         try:
             self._conn.close()
         finally:

@@ -17,6 +17,8 @@ from .markdown import send_md
 
 
 class PlanRouter:
+    """Track which chats have armed `/plan` and engage plan mode on fire."""
+
     def __init__(
         self,
         agent: AgentBackend,
@@ -25,6 +27,7 @@ class PlanRouter:
         glog: logging.Logger,
         bot_name: str,
     ) -> None:
+        """Store collaborators and start with no chats armed."""
         self._agent = agent
         self._gate = gate
         self._tr = tr
@@ -33,13 +36,16 @@ class PlanRouter:
         self._armed: set[int] = set()
 
     def is_armed(self, chat_id: int) -> bool:
+        """Return whether `/plan` is armed for the chat."""
         return chat_id in self._armed
 
     def arm(self, chat_id: int, cl: logging.Logger) -> None:
+        """Arm the chat so the next text/voice message becomes the plan prompt."""
         self._armed.add(chat_id)
         cl.info("/plan armed — waiting for next text/voice message")
 
     def disarm(self, chat_id: int) -> None:
+        """Clear the chat's armed state."""
         self._armed.discard(chat_id)
 
     async def fire(
@@ -50,6 +56,7 @@ class PlanRouter:
         react_to: Callable[[Message, str], Awaitable[None]],
         reply_with_agent: Callable[[Message, str, logging.Logger], Awaitable[None]],
     ) -> None:
+        """Engage plan mode in the agent and run one turn with the prompt."""
         await self._gate.cancel_active_aq(message.chat.id)
         try:
             await self._agent.set_permission_mode(message.chat.id, "plan")

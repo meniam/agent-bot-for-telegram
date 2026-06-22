@@ -18,12 +18,16 @@ class _RecordingRunner:
     """Stand-in for TaskRunner that records which tasks it executed."""
 
     def __init__(self) -> None:
+        """Initialize an empty record of executed task ids."""
         self.ran: list[str] = []
 
     async def run(self, task: Task) -> object:
+        """Record the task id and return a stub success outcome."""
         self.ran.append(task.id)
 
         class _Outcome:
+            """Minimal stand-in for a task run outcome."""
+
             status = "ok"
             error = None
 
@@ -31,6 +35,7 @@ class _RecordingRunner:
 
 
 def _cfg(**over: object) -> BotConfig:
+    """Build a minimal BotConfig with the given overrides."""
     base: dict[str, object] = {
         "name": "t",
         "telegram_bot_token": "1:abc",
@@ -44,6 +49,7 @@ def _cfg(**over: object) -> BotConfig:
 def _sched(
     tmp_path: Path, runner: _RecordingRunner, cfg: BotConfig
 ) -> tuple[TaskScheduler, TaskStore]:
+    """Build a TaskScheduler with a fresh store and a fixed clock."""
     store = TaskStore(tmp_path)
     sched = TaskScheduler(
         store=store,
@@ -58,15 +64,18 @@ def _sched(
 
 
 def cfg_is_allowed(cfg: BotConfig) -> Callable[[int], bool]:
+    """Build an ACL predicate from the config's allowed chat ids."""
     allowed = set(cfg.allowed_chat_ids)
 
     def _is_allowed(chat_id: int) -> bool:
+        """Return whether the chat id is in the allowed set."""
         return chat_id in allowed
 
     return _is_allowed
 
 
 def _interval_task(chat_id: int = 10) -> Task:
+    """Build an overdue 30-minute interval task for the given chat."""
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
@@ -78,6 +87,7 @@ def _interval_task(chat_id: int = 10) -> Task:
 
 
 def _once_task(chat_id: int = 10) -> Task:
+    """Build an overdue one-shot task for the given chat."""
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
@@ -91,12 +101,16 @@ def _once_task(chat_id: int = 10) -> Task:
 async def _drain(sched: TaskScheduler) -> None:
     """Run one tick and let the fire-and-forget run-tracked tasks finish."""
     await sched.tick()
-    # Yield enough for the spawned tasks to complete.
-    for _ in range(5):
+    # Await the spawned run-tracked tasks directly: they now hop through
+    # asyncio.to_thread for store I/O, so a fixed number of sleep(0) yields is
+    # no longer enough to guarantee completion.
+    while sched._inflight:
+        await asyncio.gather(*list(sched._inflight), return_exceptions=True)
         await asyncio.sleep(0)
 
 
 async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
+    """A one-shot task runs, completes, and is disabled on disk."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = _once_task()
@@ -105,7 +119,7 @@ async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == [t.id]
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
     assert stored.enabled is False
@@ -113,6 +127,7 @@ async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
 
 
 async def test_interval_task_reschedules(tmp_path: Path) -> None:
+    """An interval task runs once and reschedules its next run."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = _interval_task()
@@ -120,7 +135,7 @@ async def test_interval_task_reschedules(tmp_path: Path) -> None:
 
     await _drain(sched)
 
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "scheduled"
     assert stored.repeat.completed == 1
@@ -128,6 +143,7 @@ async def test_interval_task_reschedules(tmp_path: Path) -> None:
 
 
 async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
+    """A task whose owner lost access is paused without running."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = _interval_task(chat_id=777)  # not in allowed_chat_ids
@@ -136,7 +152,7 @@ async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == []  # never executed
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.enabled is False
     assert stored.state == "paused"
@@ -144,6 +160,7 @@ async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
 
 
 async def test_no_double_fire_within_tick(tmp_path: Path) -> None:
+    """Back-to-back ticks do not re-fire an already-advanced task."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = _interval_task()
@@ -158,6 +175,7 @@ async def test_no_double_fire_within_tick(tmp_path: Path) -> None:
 
 
 async def test_repeat_limit_completes(tmp_path: Path) -> None:
+    """A task with a repeat limit completes once the limit is reached."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = _interval_task()
@@ -166,13 +184,14 @@ async def test_repeat_limit_completes(tmp_path: Path) -> None:
 
     await _drain(sched)
 
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
     assert stored.enabled is False
 
 
 async def test_stale_oneshot_completes_without_running(tmp_path: Path) -> None:
+    """A one-shot past its grace window completes without running."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     # run_at long past the 120s one-shot grace window.
@@ -189,12 +208,13 @@ async def test_stale_oneshot_completes_without_running(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == []  # never executed
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
 
 
 async def test_recent_oneshot_runs(tmp_path: Path) -> None:
+    """A one-shot within its grace window still runs."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     t = Task(
@@ -213,6 +233,7 @@ async def test_recent_oneshot_runs(tmp_path: Path) -> None:
 
 
 async def test_stale_interval_fast_forwards_without_running(tmp_path: Path) -> None:
+    """A long-overdue interval fast-forwards without catch-up runs."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     # "every 10m" task overdue by 1h → way past its 5m grace → skip + reschedule.
@@ -229,13 +250,14 @@ async def test_stale_interval_fast_forwards_without_running(tmp_path: Path) -> N
     await _drain(sched)
 
     assert runner.ran == []  # NOT 6 catch-up runs, and not even 1
-    stored = store.get(t.id)
+    stored = await store.get(t.id)
     assert stored is not None
     assert stored.next_run_at is not None
     assert stored.next_run_at > NOW
 
 
 async def test_recent_interval_runs_once(tmp_path: Path) -> None:
+    """A slightly overdue interval within grace runs once."""
     runner = _RecordingRunner()
     sched, store = _sched(tmp_path, runner, _cfg())
     # Overdue by 1 min, well within the 30m-task grace (15m) → one catch-up run.

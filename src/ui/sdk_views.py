@@ -96,6 +96,7 @@ _MCP_GROUP_ORDER: tuple[str, ...] = (
 
 
 def format_mcp_status(status: dict[str, Any], tr: Translator) -> str:
+    """Render MCP server status grouped by connection state as Markdown."""
     servers = status.get("mcpServers") or []
     if not servers:
         return tr.t("mcp_empty")
@@ -137,6 +138,7 @@ def format_mcp_status(status: dict[str, Any], tr: Translator) -> str:
 
 
 def format_server_info(info: dict[str, Any], tr: Translator) -> str:
+    """Render server info (output style and command list) as Markdown."""
     cmds = info.get("commands") or []
     style = info.get("output_style") or info.get("outputStyle") or "default"
     styles = (

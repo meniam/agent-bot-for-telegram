@@ -28,10 +28,12 @@ class ReactionPicker:
         rules: Iterable[tuple[re.Pattern[str], str]],
         default: str = FALLBACK_REACTION,
     ) -> None:
+        """Store the ordered (pattern, emoji) rules and the default emoji."""
         self._rules = list(rules)
         self._default = default
 
     def pick(self, text: str) -> str:
+        """Return the first rule's emoji matching `text`, else the default."""
         if not text:
             return self._default
         haystack = text.lower()
@@ -42,6 +44,7 @@ class ReactionPicker:
 
     @classmethod
     def from_translator(cls, translator: Translator) -> "ReactionPicker":
+        """Build a picker from the translator's `reactions` rules, skipping invalid ones."""
         raw_rules = translator.get("reactions", []) or []
         compiled: list[tuple[re.Pattern[str], str]] = []
         for entry in raw_rules:

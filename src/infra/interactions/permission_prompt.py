@@ -34,6 +34,13 @@ async def handle(
     tool_input: dict[str, Any],
     ctx: ToolPermissionContext,
 ) -> PermissionResultAllow | PermissionResultDeny:
+    """Prompt the user with Allow/Deny/Always buttons and await the verdict.
+
+    Registers the request in ``gate._pending`` keyed by a fresh id, sends the
+    inline keyboard, then blocks on the future until `on_callback` resolves it
+    or the timeout fires (timeout → deny, prompt deleted). "Always" returns an
+    Allow carrying a session-scoped `addRules` permission update.
+    """
     t = gate._t
     request_id = secrets.token_hex(8)
     loop = asyncio.get_running_loop()
@@ -105,6 +112,11 @@ async def handle(
 async def on_callback(
     gate: TelegramInteractionGate, callback: CallbackQuery
 ) -> None:
+    """Resolve a `perm:` button tap into the pending future's decision.
+
+    Validates freshness and chat ownership, sets the decision, and deletes the
+    prompt. No-op for stale or cross-chat callbacks.
+    """
     t = gate._t
     data = callback.data or ""
     if not data.startswith("perm:"):
