@@ -134,11 +134,11 @@ class AgentBackend(Protocol):
         """Delete session ``sid``; drops the live client if it was current. None if unknown."""
         ...
 
-    def list_sessions(self, chat_id: int) -> "list[Session]":
+    async def list_sessions(self, chat_id: int) -> "list[Session]":
         """All stored sessions for the chat, ordered by creation."""
         ...
 
-    def current_session(self, chat_id: int) -> "Session | None":
+    async def current_session(self, chat_id: int) -> "Session | None":
         """Return the chat's current session, or None if it has none yet."""
         ...
 

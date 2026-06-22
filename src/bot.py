@@ -210,7 +210,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     )
     # Tag SQLite message rows with the chat's current session (BotLogs is built
     # before SessionStore, so the resolver is injected here).
-    bot_logs.set_session_resolver(sessions.current)
+    bot_logs.set_session_resolver(sessions.current_sync)
     glog.info("[%s] sessions: %s", cfg.name, session_base)
 
     streamer = DraftStreamer(
@@ -336,6 +336,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             await scheduler.stop()
         await agent.close_all()
         await bot.session.close()
+        bot_logs.close()
 
 
 async def _supervise(cfg: BotConfig, http: aiohttp.ClientSession) -> None:

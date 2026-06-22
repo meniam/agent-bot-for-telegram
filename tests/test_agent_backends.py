@@ -74,7 +74,7 @@ def test_factory_creates_pi_backend() -> None:
     assert isinstance(backend, PiAgentBackend)
 
 
-def test_claude_resume_failure_falls_back_to_fresh_session(
+async def test_claude_resume_failure_falls_back_to_fresh_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify a failed resume falls back to a freshly minted session."""
@@ -105,10 +105,10 @@ def test_claude_resume_failure_falls_back_to_fresh_session(
     monkeypatch.setattr(claude_module, "ClaudeSDKClient", _FakeClient)
 
     store = _store()
-    store.set_current(42, "missing-session-id")
+    await store.set_current(42, "missing-session-id")
     backend = ClaudeAgentBackend(store, system_prompt="x", idle_ttl_sec=0)
 
-    client = asyncio.run(backend._get_client(42))
+    client = await backend._get_client(42)
 
     # Resume client built first (raised), fresh session client built second.
     assert len(created) == 2
@@ -117,7 +117,7 @@ def test_claude_resume_failure_falls_back_to_fresh_session(
     assert created[1].options.session_id is not None
     assert client is created[1]
     # Store now points at the freshly minted session, not the broken one.
-    assert store.current_id(42) == created[1].options.session_id
+    assert await store.current_id(42) == created[1].options.session_id
 
 
 class _FakeResult:
@@ -853,15 +853,15 @@ async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
     monkeypatch.setattr(claude_module, "query", _fake_query)
 
     store = _store()
-    store.create(123)  # establish a current session
-    before = store.current_id(123)
+    await store.create(123)  # establish a current session
+    before = await store.current_id(123)
 
     backend = ClaudeAgentBackend(store, system_prompt="x")
     out = await backend.ask_ephemeral(123, "hi", allowed_tools=("Read",))
 
     assert out == "done"
     # The chat's live session / current pointer must be unchanged.
-    assert store.current_id(123) == before
+    assert await store.current_id(123) == before
     assert backend.has_session(123) is False  # no live client spun up
 
     # Permission callback allows listed tools, denies everything else.
@@ -885,3 +885,69 @@ async def test_ask_ephemeral_not_supported_on_codex() -> None:
     )
     with pytest.raises(NotImplementedError):
         await backend.ask_ephemeral(1, "x", allowed_tools=())
+
+
+# --- PiRpcProcess subprocess-protocol hardening -----------------------------
+
+
+class _ScriptedStdout:
+    """A stdout stand-in whose ``readline`` replays scripted steps in order."""
+
+    def __init__(self, steps: list[object]) -> None:
+        self._steps = list(steps)
+
+    async def readline(self) -> bytes:
+        if not self._steps:
+            return b""
+        step = self._steps.pop(0)
+        if step == "overrun":
+            raise ValueError("Separator is not found, and chunk exceed the limit")
+        assert isinstance(step, bytes)
+        return step
+
+
+class _ChunkStderr:
+    """A stderr stand-in whose ``read`` yields scripted chunks then EOF."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    async def read(self, _n: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+def _pi_process() -> Any:
+    """Construct a bare ``PiRpcProcess`` (no real subprocess spawned)."""
+    return pi_agent_module.PiRpcProcess(
+        cli_bin="pi", cwd=None, model=None, persist_session=True
+    )
+
+
+async def test_pi_reader_survives_oversized_stdout_line() -> None:
+    """A line over the StreamReader limit must not kill the reader task."""
+    proc = _pi_process()
+    proc._proc = type("P", (), {"stdout": _ScriptedStdout(
+        ["overrun", b'{"type":"response","id":"1","ok":true}\n']
+    )})()
+    fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+    proc._pending["1"] = fut
+    await proc._read_stdout()
+    assert fut.done() and fut.result()["ok"] is True
+
+
+async def test_pi_drain_stderr_consumes_large_output_without_hanging() -> None:
+    """Draining must complete even when stderr exceeds the pipe buffer size."""
+    proc = _pi_process()
+    proc._proc = type("P", (), {"stderr": _ChunkStderr([b"x" * 100_000, b"tail"])})()
+    await asyncio.wait_for(proc._drain_stderr(), timeout=1.0)
+
+
+async def test_pi_event_queue_drops_oldest_when_full() -> None:
+    """A bounded event queue drops the oldest event instead of raising/leaking."""
+    proc = _pi_process()
+    proc._events = asyncio.Queue(maxsize=2)
+    proc._offer_event({"n": 1})
+    proc._offer_event({"n": 2})
+    proc._offer_event({"n": 3})
+    assert proc._events.qsize() == 2
+    assert proc._events.get_nowait()["n"] == 2  # oldest (n=1) was dropped

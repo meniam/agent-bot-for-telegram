@@ -81,6 +81,9 @@ def test_messages_dir_creates_db_with_session(tmp_path: Path) -> None:
     log.info("hi")
     db = tmp_path / "messages" / "42.db"
     assert db.exists()
+    # The SQLite write runs in the listener's background thread; close() drains
+    # the queue and releases the connection before we read it back.
+    logs.close()
     conn = sqlite3.connect(db)
     try:
         msg = conn.execute("SELECT role, session_id FROM messages").fetchone()
@@ -109,13 +112,20 @@ def test_lru_eviction_closes_sqlite_connection(tmp_path: Path) -> None:
         messages_dir=tmp_path / "messages",
     )
     log1 = logs.for_chat(1)
+    # The SQLite handler now lives behind the per-chat QueueListener, not on the
+    # logger (which only holds the QueueHandler + file handler).
     sqlite_handlers = [
-        h for h in log1.handlers if isinstance(h, SqliteChatLogHandler)
+        h for h in logs._listeners[1].handlers
+        if isinstance(h, SqliteChatLogHandler)
     ]
     assert sqlite_handlers
     conn = sqlite_handlers[0]._conn
     logs.for_chat(2)  # evicts chat 1
     assert log1.handlers == []
+    # Eviction stops+closes the listener in a background thread (off the event
+    # loop); join it before asserting the connection is closed.
+    for t in list(logs._evict_threads):
+        t.join(timeout=5)
     # connection closed → using it raises
     try:
         conn.execute("SELECT 1")
@@ -133,6 +143,7 @@ def test_messages_dir_without_resolver_tags_null_session(tmp_path: Path) -> None
         messages_dir=tmp_path / "messages",
     )
     logs.for_chat(5).info("orphan")  # no resolver injected
+    logs.close()  # drain the background listener before reading the db
     db = tmp_path / "messages" / "5.db"
     conn = sqlite3.connect(db)
     try:
@@ -143,6 +154,27 @@ def test_messages_dir_without_resolver_tags_null_session(tmp_path: Path) -> None
     assert msg == (None,)
     assert sessions == (0,)
     _cleanup_loggers("bot.nores")
+
+
+def test_close_flushes_listener_without_loss(tmp_path: Path) -> None:
+    """Verify close() drains every queued message into SQLite before returning."""
+    logs = BotLogs(
+        name="flush",
+        base_dir=tmp_path / "bot",
+        messages_dir=tmp_path / "messages",
+    )
+    log = logs.for_chat(7)
+    for i in range(50):
+        log.info("msg %d", i)
+    logs.close()  # must drain all 50 queued writes
+    db = tmp_path / "messages" / "7.db"
+    conn = sqlite3.connect(db)
+    try:
+        count = conn.execute("SELECT count(*) FROM messages").fetchone()
+    finally:
+        conn.close()
+    assert count == (50,)
+    _cleanup_loggers("bot.flush")
 
 
 def test_resolver_returning_none_writes_null_session(tmp_path: Path) -> None:
@@ -224,7 +256,14 @@ def test_evicted_chat_reopens_as_fresh_logger(tmp_path: Path) -> None:
     reborn = logs.for_chat(1)  # re-create after eviction
     assert reborn is not first  # brand-new logger object
     assert reborn.handlers  # freshly wired, not the stripped corpse
-    assert any(isinstance(h, SqliteChatLogHandler) for h in reborn.handlers)
+    # SQLite logging is now wired through a fresh QueueHandler + listener.
+    assert any(
+        isinstance(h, logging.handlers.QueueHandler) for h in reborn.handlers
+    )
+    assert any(
+        isinstance(h, SqliteChatLogHandler)
+        for h in logs._listeners[1].handlers
+    )
     _cleanup_loggers("bot.reopen")
 
 

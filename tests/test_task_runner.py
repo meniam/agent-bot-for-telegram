@@ -128,6 +128,6 @@ async def test_history_written(tmp_path: Path) -> None:
     task = _script_task("h.py")
     await runner.run(task)
     store = TaskStore(tmp_path / "tasks")
-    runs = store.list_history(task.id)
+    runs = await store.list_history(task.id)
     assert len(runs) == 1
     assert runs[0].status == "ok"

@@ -80,31 +80,31 @@ class BaseAgentBackend:
     async def new_session(self, chat_id: int) -> Session:
         """Reset the live connection and create a fresh current session."""
         await self.reset(chat_id)
-        return self._store.create(chat_id)
+        return await self._store.create(chat_id)
 
     async def switch_session(self, chat_id: int, sid: str) -> Session | None:
         """Make session ``sid`` current after a reset; return None if unknown."""
-        session = self._store.get_by_id(chat_id, sid)
+        session = await self._store.get_by_id(chat_id, sid)
         if session is None:
             return None
         await self.reset(chat_id)
-        self._store.set_current(chat_id, session.id)
+        await self._store.set_current(chat_id, session.id)
         return session
 
     async def delete_session(self, chat_id: int, sid: str) -> Session | None:
         """Delete session ``sid``, resetting first if it was current. None if unknown."""
-        target = self._store.get_by_id(chat_id, sid)
+        target = await self._store.get_by_id(chat_id, sid)
         if target is None:
             return None
-        if self._store.current_id(chat_id) == target.id:
+        if await self._store.current_id(chat_id) == target.id:
             await self.reset(chat_id)
-        self._store.delete(chat_id, target.id)
+        await self._store.delete(chat_id, target.id)
         return target
 
-    def list_sessions(self, chat_id: int) -> list[Session]:
+    async def list_sessions(self, chat_id: int) -> list[Session]:
         """Return all stored sessions for the chat."""
-        return self._store.all_sessions(chat_id)
+        return await self._store.all_sessions(chat_id)
 
-    def current_session(self, chat_id: int) -> Session | None:
+    async def current_session(self, chat_id: int) -> Session | None:
         """Return the chat's current session, or None if it has none."""
-        return self._store.current(chat_id)
+        return await self._store.current(chat_id)

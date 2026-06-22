@@ -93,7 +93,7 @@ class TaskScheduler:
     async def tick(self) -> None:
         """Run one scheduler pass (also callable directly from tests)."""
         now = self._now()
-        for task in self._store.list_due(now):
+        for task in await self._store.list_due(now):
             if task.id in self._running:
                 continue
             if not self._owner_allowed(task):

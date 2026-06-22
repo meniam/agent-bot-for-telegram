@@ -239,11 +239,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
         if entry is None:
             # No live client: resume the chat's current persisted session, or
             # mint a new one if this chat has never talked before.
-            sid = self._store.current_id(chat_id)
+            sid = await self._store.current_id(chat_id)
             if sid is not None:
                 options = self._make_options(chat_id, resume=sid)
             else:
-                sid = self._store.create(chat_id).id
+                sid = (await self._store.create(chat_id)).id
                 options = self._make_options(chat_id, session_id=sid)
             client = ClaudeSDKClient(options=options)
             try:
@@ -261,14 +261,14 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 )
                 with contextlib.suppress(Exception):
                     await client.__aexit__(None, None, None)
-                sid = self._store.create(chat_id).id
+                sid = (await self._store.create(chat_id)).id
                 options = self._make_options(chat_id, session_id=sid)
                 client = ClaudeSDKClient(options=options)
                 await client.__aenter__()
             if self._initial_model:
                 await client.set_model(self._initial_model)
                 self._models[chat_id] = self._initial_model
-            self._store.touch(chat_id, sid)
+            await self._store.touch(chat_id, sid)
         else:
             client, _ = entry
         self._clients[chat_id] = (client, time.monotonic())
@@ -388,16 +388,16 @@ class ClaudeAgentBackend(BaseAgentBackend):
         """Start a fresh session; the previous one stays in the list."""
         async with self._lock(chat_id):
             await self._drop_client(chat_id)
-            return self._store.create(chat_id)
+            return await self._store.create(chat_id)
 
     async def switch_session(self, chat_id: int, sid: str) -> Session | None:
         """Make the given session current; next turn resumes its history."""
         async with self._lock(chat_id):
-            session = self._store.get_by_id(chat_id, sid)
+            session = await self._store.get_by_id(chat_id, sid)
             if session is None:
                 return None
             await self._drop_client(chat_id)
-            self._store.set_current(chat_id, session.id)
+            await self._store.set_current(chat_id, session.id)
             return session
 
     async def delete_session(self, chat_id: int, sid: str) -> Session | None:
@@ -407,12 +407,12 @@ class ClaudeAgentBackend(BaseAgentBackend):
         current session.
         """
         async with self._lock(chat_id):
-            target = self._store.get_by_id(chat_id, sid)
+            target = await self._store.get_by_id(chat_id, sid)
             if target is None:
                 return None
-            if self._store.current_id(chat_id) == target.id:
+            if await self._store.current_id(chat_id) == target.id:
                 await self._drop_client(chat_id)
-            self._store.delete(chat_id, target.id)
+            await self._store.delete(chat_id, target.id)
             return target
 
     async def generate_title(self, text: str) -> str | None:

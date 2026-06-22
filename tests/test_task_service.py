@@ -136,7 +136,7 @@ async def test_list_newest_first(tmp_path: Path) -> None:
     first = await svc.create(USER, schedule_text="2m", prompt="first")
     second = await svc.create(USER, schedule_text="2m", prompt="second")
     third = await svc.create(USER, schedule_text="2m", prompt="third")
-    assert [t.id for t in svc.list(USER)] == [third.id, second.id, first.id]
+    assert [t.id for t in await svc.list(USER)] == [third.id, second.id, first.id]
 
 
 async def test_list_isolates_users(tmp_path: Path) -> None:
@@ -145,9 +145,9 @@ async def test_list_isolates_users(tmp_path: Path) -> None:
     await svc.create(USER, schedule_text="2m", prompt="mine")
     await svc.create(ADMIN, schedule_text="2m", prompt="theirs", scope="global")
     # Plain user sees only their own task, not the global one.
-    assert len(svc.list(USER)) == 1
+    assert len(await svc.list(USER)) == 1
     # Admin sees their own (none) plus the global one.
-    assert len(svc.list(ADMIN)) == 1
+    assert len(await svc.list(ADMIN)) == 1
 
 
 # ----- act ------------------------------------------------------------------
@@ -169,7 +169,7 @@ async def test_act_pause_resume_run_rm(tmp_path: Path) -> None:
     assert ran.next_run_at is not None
 
     await svc.act(USER, "rm", task.id)
-    assert svc.list(USER) == []
+    assert await svc.list(USER) == []
 
 
 async def test_act_unknown_id_raises(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ alongside the message-log handler's long-lived connection (WAL serializes
 writers).
 """
 
+import asyncio
 import logging
 import sqlite3
 import time
@@ -86,8 +87,12 @@ class SessionStore:
             last_used=float(row["last_used"] or 0.0),
         )
 
-    def all_sessions(self, chat_id: int) -> list[Session]:
-        """Sessions ordered by ``created_at`` — index+1 is the `/sess <n>` ordinal."""
+    # Public methods are async: the actual sqlite work runs in a worker thread
+    # (via ``asyncio.to_thread``) so a short blocking read/write never stalls the
+    # event loop. The ``_*_sync`` helpers hold the real I/O and may be composed
+    # directly (one thread hop per public call).
+
+    def _all_sessions_sync(self, chat_id: int) -> list[Session]:
         path = self._path(chat_id)
         if not path.exists():
             return []
@@ -109,8 +114,11 @@ class SessionStore:
             conn.close()
         return [self._row_to_session(r) for r in rows]
 
-    def current_id(self, chat_id: int) -> str | None:
-        """Return the chat's current session id, or None if unset/unreadable."""
+    async def all_sessions(self, chat_id: int) -> list[Session]:
+        """Sessions ordered by ``created_at`` — index+1 is the `/sess <n>` ordinal."""
+        return await asyncio.to_thread(self._all_sessions_sync, chat_id)
+
+    def _current_id_sync(self, chat_id: int) -> str | None:
         path = self._path(chat_id)
         if not path.exists():
             return None
@@ -132,18 +140,53 @@ class SessionStore:
             return None
         return str(row[0])
 
-    def current(self, chat_id: int) -> Session | None:
-        """Return the chat's current `Session`, or None if there is none."""
-        sid = self.current_id(chat_id)
+    async def current_id(self, chat_id: int) -> str | None:
+        """Return the chat's current session id, or None if unset/unreadable."""
+        return await asyncio.to_thread(self._current_id_sync, chat_id)
+
+    def _get_by_id_sync(self, chat_id: int, sid: str) -> Session | None:
+        path = self._path(chat_id)
+        if not path.exists():
+            return None
+        try:
+            conn = connect(path)
+        except Exception:
+            log.exception("session store: failed to open %s", path)
+            return None
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT id, title, auto_titled, created_at, last_used "
+                "FROM sessions WHERE id = ?",
+                (sid,),
+            ).fetchone()
+        except Exception:
+            log.exception("session store: failed to read %s", path)
+            return None
+        finally:
+            conn.close()
+        return self._row_to_session(row) if row is not None else None
+
+    def _current_sync(self, chat_id: int) -> Session | None:
+        sid = self._current_id_sync(chat_id)
         if sid is None:
             return None
-        for s in self.all_sessions(chat_id):
-            if s.id == sid:
-                return s
-        return None
+        return self._get_by_id_sync(chat_id, sid)
 
-    def create(self, chat_id: int) -> Session:
-        """Mint a new session, persist it, and make it current."""
+    async def current(self, chat_id: int) -> Session | None:
+        """Return the chat's current `Session`, or None if there is none."""
+        return await asyncio.to_thread(self._current_sync, chat_id)
+
+    def current_sync(self, chat_id: int) -> Session | None:
+        """Look up the current session synchronously, for non-async callers.
+
+        Used by the SQLite log handler's session resolver, which runs in the
+        QueueListener's background thread (no event loop to await on). Event-loop
+        callers must use the async `current` instead.
+        """
+        return self._current_sync(chat_id)
+
+    def _create_sync(self, chat_id: int) -> Session:
         now = time.time()
         session = Session(
             id=str(uuid.uuid4()),
@@ -171,8 +214,11 @@ class SessionStore:
             conn.close()
         return session
 
-    def set_current(self, chat_id: int, sid: str) -> None:
-        """Point the chat's current pointer at session ``sid``."""
+    async def create(self, chat_id: int) -> Session:
+        """Mint a new session, persist it, and make it current."""
+        return await asyncio.to_thread(self._create_sync, chat_id)
+
+    def _set_current_sync(self, chat_id: int, sid: str) -> None:
         conn = connect(self._path(chat_id))
         try:
             conn.execute(_UPSERT_CURRENT, (sid,))
@@ -180,26 +226,27 @@ class SessionStore:
         finally:
             conn.close()
 
-    def get_by_ordinal(self, chat_id: int, ordinal: int) -> Session | None:
+    async def set_current(self, chat_id: int, sid: str) -> None:
+        """Point the chat's current pointer at session ``sid``."""
+        await asyncio.to_thread(self._set_current_sync, chat_id, sid)
+
+    async def get_by_ordinal(self, chat_id: int, ordinal: int) -> Session | None:
         """Return the 1-based ``ordinal`` session (creation order), or None."""
-        sessions = self.all_sessions(chat_id)
+        sessions = await self.all_sessions(chat_id)
         if 1 <= ordinal <= len(sessions):
             return sessions[ordinal - 1]
         return None
 
-    def get_by_id(self, chat_id: int, sid: str) -> Session | None:
-        """Return the session with id ``sid``, or None if not found."""
-        for s in self.all_sessions(chat_id):
-            if s.id == sid:
-                return s
-        return None
+    async def get_by_id(self, chat_id: int, sid: str) -> Session | None:
+        """Return the session with id ``sid`` (indexed lookup), or None."""
+        return await asyncio.to_thread(self._get_by_id_sync, chat_id, sid)
 
-    def list_by_recency(self, chat_id: int) -> list[Session]:
+    async def list_by_recency(self, chat_id: int) -> list[Session]:
         """Sessions newest-interaction-first (by ``last_used``) — for display."""
-        return sorted(self.all_sessions(chat_id), key=lambda s: s.last_used, reverse=True)
+        sessions = await self.all_sessions(chat_id)
+        return sorted(sessions, key=lambda s: s.last_used, reverse=True)
 
-    def set_title(self, chat_id: int, sid: str, title: str) -> None:
-        """Set a session's title and mark it as auto-titled."""
+    def _set_title_sync(self, chat_id: int, sid: str, title: str) -> None:
         conn = connect(self._path(chat_id))
         try:
             conn.execute(
@@ -210,13 +257,11 @@ class SessionStore:
         finally:
             conn.close()
 
-    def delete(self, chat_id: int, sid: str) -> str | None:
-        """Remove a session's meta row and return the resulting current id.
+    async def set_title(self, chat_id: int, sid: str, title: str) -> None:
+        """Set a session's title and mark it as auto-titled."""
+        await asyncio.to_thread(self._set_title_sync, chat_id, sid, title)
 
-        If the deleted session was current, repoint current to the most
-        recently created remaining session (or None if none are left). The
-        SDK's on-disk JSONL is left untouched.
-        """
+    def _delete_sync(self, chat_id: int, sid: str) -> str | None:
         conn = connect(self._path(chat_id))
         try:
             conn.execute("DELETE FROM sessions WHERE id = ?", (sid,))
@@ -235,8 +280,16 @@ class SessionStore:
             conn.close()
         return str(current) if current else None
 
-    def touch(self, chat_id: int, sid: str) -> None:
-        """Update a session's ``last_used`` timestamp to now."""
+    async def delete(self, chat_id: int, sid: str) -> str | None:
+        """Remove a session's meta row and return the resulting current id.
+
+        If the deleted session was current, repoint current to the most
+        recently created remaining session (or None if none are left). The
+        SDK's on-disk JSONL is left untouched.
+        """
+        return await asyncio.to_thread(self._delete_sync, chat_id, sid)
+
+    def _touch_sync(self, chat_id: int, sid: str) -> None:
         conn = connect(self._path(chat_id))
         try:
             conn.execute(
@@ -246,4 +299,8 @@ class SessionStore:
             conn.commit()
         finally:
             conn.close()
+
+    async def touch(self, chat_id: int, sid: str) -> None:
+        """Update a session's ``last_used`` timestamp to now."""
+        await asyncio.to_thread(self._touch_sync, chat_id, sid)
 
