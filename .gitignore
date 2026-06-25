@@ -1,6 +1,4 @@
-.claude/
-.codex/
-.pi/
+.claude/settings.local.json
 .env
 .data
 config.json
