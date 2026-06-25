@@ -1,0 +1,23 @@
+# Build context hygiene — keep secrets and host-specific state out of the image.
+.venv
+.git
+.github
+**/__pycache__
+*.pyc
+*.pyo
+
+# Runtime state (mounted as volumes, never baked in).
+var
+uploads
+logs
+
+# Secrets / host-bound config — the container mounts config.docker.yaml instead.
+src/config/config.yaml
+.env
+
+# Local tooling
+node_modules
+.mypy_cache
+.ruff_cache
+.pytest_cache
+tests

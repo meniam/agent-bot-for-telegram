@@ -44,7 +44,7 @@ brain:
     # Upload handling for photos, documents, and stickers.
     uploads:
       # Directory where incoming files are saved; null disables uploads.
-      dir: /var/lib/abt/uploads
+      dir: ../../var/brain/uploads
       # Reject files larger than this many bytes; 0 disables the local check.
       max_bytes: 20971520
 

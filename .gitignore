@@ -9,6 +9,7 @@ config.yml
 src/config/config.json
 src/config/config.yaml
 src/config/config.yml
+src/config/config.docker.yaml
 logs/
 uploads/
 commands/

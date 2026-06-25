@@ -1,0 +1,70 @@
+# Container config template. Copy to config.docker.yaml and fill in secrets:
+#
+#   cp src/config/config.docker.example.yaml src/config/config.docker.yaml
+#
+# config.docker.yaml is gitignored (holds real secrets). It is bind-mounted over
+# src/config/config.yaml at runtime by docker-compose.
+#
+# Paths are CONTAINER paths, not host paths:
+#   /vault    -> bind-mounted Obsidian working dir
+#   /app/var  -> ./var bind mount (logs / messages / tasks / commands / uploads)
+brain:
+  gateway:
+    telegram_bot_token: "put-your-telegram-bot-token-here"
+    lang: ru
+    logs_dir: /app/var/brain/logs
+    commands_dir: /app/var/brain/commands
+    messages_dir: /app/var/brain/messages
+    draft_interval_sec: 2.0
+    approval_timeout_sec: 300
+    chat_logger_capacity: 256
+
+    access:
+      allowed_for_all: false
+      allowed_chat_ids:
+        - 114954417
+      blacklist_chat_ids: []
+      admin_chat_ids:
+        - 114954417
+
+    voice:
+      # Groq API key for voice/audio transcription; null disables it.
+      api_key: null
+      model: whisper-large-v3-turbo
+      max_duration_sec: 600
+      timeout_sec: 60.0
+
+    uploads:
+      dir: /app/var/brain/uploads
+      max_bytes: 20971520
+
+  tasks:
+    enabled: true
+    dir: /app/var/brain/tasks
+    scripts_dir: /app/var/brain/scripts
+    tick_interval_sec: 60
+    max_output_chars: 4000
+    script_timeout_sec: 300
+    history_limit: 100
+    allowed_tools: [Read, Glob, Grep, WebFetch]
+
+  agent:
+    provider: claude
+    model: claude-sonnet-4-6
+    working_path: /vault
+    agent_timeout_sec: 3600
+    session_idle_ttl_sec: 2592000
+    system_prompt: >-
+      Ты дружелюбный веселый и ироничный ассистент в Telegram по имени Браин.
+      Отвечай кратко и по делу и всегда на русском языке. Меня зовут Евгений, я
+      твой разработчик. Будь веселым и язвительным, местами токсичным и циничным.
+
+  providers:
+    codex:
+      sandbox: workspace_write
+      approval_mode: never
+
+    pi:
+      cli_bin: /usr/bin/pi
+      tools_mode: default
+      session_persistence: true

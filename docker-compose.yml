@@ -1,0 +1,30 @@
+services:
+  abt:
+    build: .
+    image: abt:latest
+    container_name: abt
+    restart: unless-stopped
+    volumes:
+      # Live project code from the host, read-only. The editable install adds
+      # /app to sys.path, so /app/src is imported straight from the host —
+      # edits reflect on `docker compose restart`, no rebuild. Rebuild is only
+      # needed when dependencies (pyproject.toml) change.
+      - ./src:/app/src:ro
+      - ./.agents:/app/.agents:ro
+
+      # Container config (paths point at the mounts below). Nested under ./src
+      # above, so this more-specific mount still overrides config.yaml.
+      - ./src/config/config.docker.yaml:/app/src/config/config.yaml:ro
+
+      # Live Obsidian vault = agent working dir. Read-write: the bot edits notes
+      # and writes skill symlinks under /vault/.claude/skills.
+      - /Users/eugene/Documents/Obsidian/Brain:/vault
+
+      # Agent credentials + per-session history from the host.
+      # ~/.claude also holds the SDK session store (keyed by cwd=/vault).
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.codex:/root/.codex
+      - ${HOME}/.pi:/root/.pi
+
+      # Persistent bot state (logs, message DBs, tasks, commands, uploads).
+      - ./var:/app/var
