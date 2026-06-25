@@ -177,6 +177,21 @@ class ToolStatusMirror:
         """Start a fresh visible status line for the next agent turn."""
         self._last_status_message.pop(chat_id, None)
 
+    async def end_turn(self, chat_id: int) -> None:
+        """Delete the turn's status line once the final answer is delivered.
+
+        The mirror is live progress, not an audit trail (the per-chat log keeps
+        that); leaving it would clutter the chat with a stale tool line. Best
+        effort — a delete failure is swallowed so it never breaks the reply.
+        """
+        message_id = self._last_status_message.pop(chat_id, None)
+        if message_id is None:
+            return
+        try:
+            await self._bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except TelegramBadRequest:
+            log.debug("tool status delete failed", exc_info=True)
+
     async def _upsert_status(self, chat_id: int, body: str) -> None:
         """Edit the chat's status message in place, or send a new one."""
         body = _one_line(body)

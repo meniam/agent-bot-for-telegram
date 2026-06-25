@@ -107,67 +107,73 @@ async def reply_with_agent(
             prompt = format_attachment_prompt(pending, prompt)
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     ctx.tool_mirror.begin_turn(message.chat.id)
+    # Always clear the live tool-status line once the turn ends — every exit
+    # path (answer, delivery, questionnaire, timeout, reset, error) runs the
+    # finally so no stale status survives into the chat.
     try:
-        chunks = ctx.agent.ask_stream(message.chat.id, prompt)
-        answer = await asyncio.wait_for(
-            ctx.streamer.stream(message.chat.id, chunks),
-            timeout=ctx.cfg.agent_timeout_sec,
-        )
-    except TimeoutError:
-        ctx.glog.warning(
-            "[%s] agent timeout (chat_id=%s)", ctx.cfg.name, message.chat.id
-        )
-        cl.warning("agent timeout after %ss", ctx.cfg.agent_timeout_sec)
-        await send_md(
-            message,
-            ctx.tr.t("agent_timeout", seconds=ctx.cfg.agent_timeout_sec),
-        )
-        return
-    except AgentTurnReset as e:
-        cl.info("agent turn reset: %s", e)
-        return
-    except AgentEventStreamTimeout as e:
-        ctx.glog.warning("[%s] agent event stream timeout: %s", ctx.cfg.name, e)
-        cl.warning("agent event stream timeout: %s", e)
-        await send_md(message, ctx.tr.t("agent_stalled"))
-        return
-    except Exception as e:
-        ctx.glog.exception("[%s] agent error", ctx.cfg.name)
-        cl.exception("agent error: %s", e)
-        await send_md(
-            message, ctx.tr.t("error_internal", error=type(e).__name__)
-        )
-        return
-    await _name_session_in_background(ctx, message.chat.id, user_text, cl)
-    final = answer.strip() or ctx.tr.t("empty_answer")
-    delivery = parse_file_delivery(final)
-    if delivery is not None:
-        roots = [
-            path
-            for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir)
-            if path is not None
-        ]
-        cl.info(
-            "bot file delivery: %d file(s)",
-            len(delivery.files),
-            extra={"role": ROLE_BOT},
-        )
-        await send_file_delivery(
-            message,
-            delivery,
-            roots=[Path(path) for path in roots],
-            t=ctx.tr,
-            cl=cl,
-        )
-        return
-    questionnaire = parse_questionnaire(final)
-    if questionnaire is not None:
-        cl.info(
-            "bot questionnaire: %d question(s)",
-            len(questionnaire.questions),
-            extra={"role": ROLE_BOT},
-        )
-        await render_questionnaire(message, questionnaire, ctx.tr)
-        return
-    cl.info("bot: %s", final, extra={"role": ROLE_BOT})
-    await send_md(message, final)
+        try:
+            chunks = ctx.agent.ask_stream(message.chat.id, prompt)
+            answer = await asyncio.wait_for(
+                ctx.streamer.stream(message.chat.id, chunks),
+                timeout=ctx.cfg.agent_timeout_sec,
+            )
+        except TimeoutError:
+            ctx.glog.warning(
+                "[%s] agent timeout (chat_id=%s)", ctx.cfg.name, message.chat.id
+            )
+            cl.warning("agent timeout after %ss", ctx.cfg.agent_timeout_sec)
+            await send_md(
+                message,
+                ctx.tr.t("agent_timeout", seconds=ctx.cfg.agent_timeout_sec),
+            )
+            return
+        except AgentTurnReset as e:
+            cl.info("agent turn reset: %s", e)
+            return
+        except AgentEventStreamTimeout as e:
+            ctx.glog.warning("[%s] agent event stream timeout: %s", ctx.cfg.name, e)
+            cl.warning("agent event stream timeout: %s", e)
+            await send_md(message, ctx.tr.t("agent_stalled"))
+            return
+        except Exception as e:
+            ctx.glog.exception("[%s] agent error", ctx.cfg.name)
+            cl.exception("agent error: %s", e)
+            await send_md(
+                message, ctx.tr.t("error_internal", error=type(e).__name__)
+            )
+            return
+        await _name_session_in_background(ctx, message.chat.id, user_text, cl)
+        final = answer.strip() or ctx.tr.t("empty_answer")
+        delivery = parse_file_delivery(final)
+        if delivery is not None:
+            roots = [
+                path
+                for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir)
+                if path is not None
+            ]
+            cl.info(
+                "bot file delivery: %d file(s)",
+                len(delivery.files),
+                extra={"role": ROLE_BOT},
+            )
+            await send_file_delivery(
+                message,
+                delivery,
+                roots=[Path(path) for path in roots],
+                t=ctx.tr,
+                cl=cl,
+            )
+            return
+        questionnaire = parse_questionnaire(final)
+        if questionnaire is not None:
+            cl.info(
+                "bot questionnaire: %d question(s)",
+                len(questionnaire.questions),
+                extra={"role": ROLE_BOT},
+            )
+            await render_questionnaire(message, questionnaire, ctx.tr)
+            return
+        cl.info("bot: %s", final, extra={"role": ROLE_BOT})
+        await send_md(message, final)
+    finally:
+        await ctx.tool_mirror.end_turn(message.chat.id)
