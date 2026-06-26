@@ -32,6 +32,9 @@ def create_agent_backend(
     add_dirs: list[str],
     on_tool_event: ToolEventCallback | None,
     task_server_factory: Callable[[int], McpSdkServerConfig | None] | None = None,
+    graphiti_server_factory: (
+        Callable[[int], McpSdkServerConfig | None] | None
+    ) = None,
     codex_factory: Callable[[], Any] | None = None,
     pi_transport_factory: Callable[[str | None], Any] | None = None,
 ) -> AgentBackend:
@@ -50,7 +53,9 @@ def create_agent_backend(
             on_tool_event=on_tool_event,
             initial_model=cfg.agent_model,
             task_server_factory=task_server_factory,
+            graphiti_server_factory=graphiti_server_factory,
             lang=cfg.lang,
+            dangerously_skip_permissions=cfg.agent_dangerously_skip_permissions,
         )
     if cfg.agent_provider == "codex":
         return CodexAgentBackend(

@@ -38,7 +38,7 @@ COPY src ./src
 COPY .agents ./.agents
 RUN pip install -e .
 
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY .docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]

@@ -41,6 +41,8 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
         "model": "agent_model",
         "agent_provider": "agent_provider",
         "agent_model": "agent_model",
+        "dangerously_skip_permissions": "agent_dangerously_skip_permissions",
+        "agent_dangerously_skip_permissions": "agent_dangerously_skip_permissions",
     },
     "codex": {
         "sandbox": "codex_sandbox",
@@ -113,6 +115,8 @@ AGENT_CONFIG_FIELDS: dict[str, str] = {
     "model": "agent_model",
     "agent_provider": "agent_provider",
     "agent_model": "agent_model",
+    "dangerously_skip_permissions": "agent_dangerously_skip_permissions",
+    "agent_dangerously_skip_permissions": "agent_dangerously_skip_permissions",
     "system_prompt": "system_prompt",
     "working_dir": "working_dir",
     "working_path": "working_dir",
@@ -139,6 +143,10 @@ class BotConfig(BaseModel):
     system_prompt: str | None = None
     agent_provider: Literal["claude", "codex", "pi"] = "claude"
     agent_model: str | None = None
+    # Claude only: run with permission_mode="bypassPermissions" (the SDK twin of
+    # `claude --dangerously-skip-permissions`). Skips the Telegram permission
+    # gate entirely. Intended for isolated/containerized runs.
+    agent_dangerously_skip_permissions: bool = False
     codex_sandbox: Literal[
         "read_only", "workspace_write", "danger_full_access"
     ] = "workspace_write"
@@ -436,6 +444,9 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "system_prompt": data.get("system_prompt"),
         "agent_provider": data.get("agent_provider", "claude"),
         "agent_model": data.get("agent_model"),
+        "agent_dangerously_skip_permissions": data.get(
+            "agent_dangerously_skip_permissions", False
+        ),
         "codex_sandbox": data.get("codex_sandbox", "workspace_write"),
         "codex_approval_mode": data.get("codex_approval_mode", "default"),
         "pi_cli_bin": data.get("pi_cli_bin"),

@@ -1,9 +1,19 @@
 services:
   abt:
-    build: .
+    build:
+      context: .
+      dockerfile: .docker/abt/Dockerfile
     image: abt:latest
     container_name: abt
     restart: unless-stopped
+    depends_on:
+      - graphiti
+    environment:
+      # The container is itself the sandbox. claude-code (>=2.1.x) refuses
+      # --dangerously-skip-permissions when running as root unless IS_SANDBOX=1
+      # is set, which the agent uses whenever agent_dangerously_skip_permissions
+      # is on. Without this every fresh session spawn exits 1.
+      - IS_SANDBOX=1
     volumes:
       # Live project code from the host, read-only. The editable install adds
       # /app to sys.path, so /app/src is imported straight from the host —
@@ -28,3 +38,50 @@ services:
 
       # Persistent bot state (logs, message DBs, tasks, commands, uploads).
       - ./var:/app/var
+
+  # Temporal knowledge-graph memory. The bot's Claude agent reaches it as an
+  # MCP server over HTTP (see /vault/.mcp.json -> http://graphiti:8000/mcp/).
+  graphiti:
+    image: zepai/knowledge-graph-mcp:standalone
+    container_name: graphiti
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-demodemo}
+      - NEO4J_DATABASE=neo4j
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4.1-mini}
+      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-main}
+      - SEMAPHORE_LIMIT=${SEMAPHORE_LIMIT:-10}
+      - CONFIG_PATH=/app/mcp/config/config.yaml
+    volumes:
+      - ./.docker/graphiti-config.yaml:/app/mcp/config/config.yaml:ro
+    # No host port: the bot reaches the MCP server over the compose network at
+    # graphiti:8000. Add `ports: ["8000:8000"]` only to hit it from the host.
+    command: ['uv', 'run', 'main.py']
+
+  neo4j:
+    image: neo4j:5.26.0
+    container_name: neo4j
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-demodemo}
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+    ports:
+      - '7474:7474' # Neo4j browser UI
+      - '7687:7687' # Bolt
+    volumes:
+      - ./var/neo4j/data:/data
+      - ./var/neo4j/logs:/logs
+    healthcheck:
+      test: ['CMD', 'wget', '-O', '/dev/null', 'http://localhost:7474']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

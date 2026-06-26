@@ -51,6 +51,9 @@ brain:
   agent:
     provider: claude
     model: claude-sonnet-4-6
+    # Container is isolated → skip the Telegram permission gate entirely
+    # (SDK permission_mode=bypassPermissions). Claude only.
+    dangerously_skip_permissions: true
     working_path: /vault
     agent_timeout_sec: 3600
     session_idle_ttl_sec: 2592000

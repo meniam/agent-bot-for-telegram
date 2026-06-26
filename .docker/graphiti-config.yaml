@@ -1,0 +1,138 @@
+# Graphiti MCP Server config (Neo4j backend), mounted into the graphiti service
+# at /app/mcp/config/config.yaml. Values are env-interpolated by the server, so
+# secrets live in the root .env (compose passes them through), not here.
+# Vendored from getzep/graphiti mcp_server/config/config-docker-neo4j.yaml.
+
+server:
+  transport: "http"  # HTTP transport (SSE is deprecated). MCP at :8000/mcp/
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  provider: "openai"  # openai, azure_openai, anthropic, gemini, groq
+  model: ${MODEL_NAME:gpt-4.1-mini}
+  max_tokens: 4096
+
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+      organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+embedder:
+  provider: "openai"  # openai, azure_openai, gemini, voyage
+  model: ${EMBEDDER_MODEL:text-embedding-3-small}
+  dimensions: 1536
+
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+      organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+database:
+  provider: "neo4j"
+
+  providers:
+    neo4j:
+      uri: ${NEO4J_URI:bolt://neo4j:7687}
+      username: ${NEO4J_USER:neo4j}
+      password: ${NEO4J_PASSWORD:demodemo}
+      database: ${NEO4J_DATABASE:neo4j}
+      use_parallel_runtime: ${USE_PARALLEL_RUNTIME:false}
+
+graphiti:
+  group_id: ${GRAPHITI_GROUP_ID:main}
+  episode_id_prefix: ${EPISODE_ID_PREFIX:}
+  user_id: ${USER_ID:mcp_user}
+  # Entity types tuned for a personal-assistant knowledge graph (people, work,
+  # gear, habits). Person/Preference are the hubs — most facts hang off them.
+  entity_types:
+    - name: "Person"
+      description: "People: family, friends, colleagues, contacts (e.g. Ирина, Маруся, work contacts). PRIORITIZE — central to this graph."
+    - name: "Preference"
+      description: "Likes, dislikes, choices, habits, opinions (e.g. favored brands, coffee, smoking IQOS). PRIORITIZE."
+    - name: "Project"
+      description: "Work or personal initiatives and products (e.g. 4Partners, Evirma, smart home)."
+    - name: "Organization"
+      description: "Companies, institutions, teams, or formal entities."
+    - name: "Technology"
+      description: "Tools, languages, frameworks, devices, gadgets, hardware (e.g. PostgreSQL, ClickHouse, Wirenboard, IQOS, Claude Code)."
+    - name: "Location"
+      description: "Physical or virtual places: cities, countries, venues (e.g. Воронеж)."
+    - name: "Event"
+      description: "Time-bound activities: meetings, trips, occurrences, experiences."
+    - name: "Requirement"
+      description: "Specific needs, tasks, or desired outcomes to be fulfilled."
+    - name: "Procedure"
+      description: "Step-by-step instructions, runbooks, standard operating procedures."
+    - name: "Topic"
+      description: "Subject of interest or knowledge domain (use as last resort)."
+  # Edge types = labels for the relationships (facts) between entities. Without
+  # these the extractor invents free-text relation names (PREFERS / LIKES / WANTS
+  # for one meaning), which fragments the graph. Defining them keeps facts tidy.
+  edge_types:
+    - name: "HasPreference"
+      description: "Subject likes, favors, or chooses something"
+    - name: "RelatedToPerson"
+      description: "Family or interpersonal tie (spouse, child, friend, colleague)"
+    - name: "WorksOn"
+      description: "Subject participates in, builds, or owns a project"
+    - name: "AffiliatedWith"
+      description: "Subject is employed by, founder of, or member of an organization"
+    - name: "Uses"
+      description: "Subject uses, owns, or relies on a technology, tool, or device"
+    - name: "LocatedAt"
+      description: "Subject is, lives, or happens at a place"
+    - name: "AttendedEvent"
+      description: "Subject takes part in or is involved with an event"
+    - name: "PartOf"
+      description: "Subject is a component or sub-part of something larger"
+    - name: "Requires"
+      description: "Subject needs a specific requirement, outcome, or task"
+    - name: "FollowsProcedure"
+      description: "Subject follows or is bound by a procedure or set of steps"
+    - name: "RelatedToTopic"
+      description: "Subject is about, concerns, or relates to a topic"
+  # Map = which edge type is allowed between which entity pair. "Entity" is a
+  # wildcard for any source. Pairs not listed fall back to free-text names.
+  edge_type_map:
+    - source: "Person"
+      target: "Preference"
+      edge_types: ["HasPreference"]
+    - source: "Person"
+      target: "Technology"
+      edge_types: ["HasPreference", "Uses"]
+    - source: "Person"
+      target: "Person"
+      edge_types: ["RelatedToPerson"]
+    - source: "Person"
+      target: "Project"
+      edge_types: ["WorksOn"]
+    - source: "Person"
+      target: "Organization"
+      edge_types: ["AffiliatedWith"]
+    - source: "Person"
+      target: "Location"
+      edge_types: ["LocatedAt"]
+    - source: "Person"
+      target: "Event"
+      edge_types: ["AttendedEvent"]
+    - source: "Project"
+      target: "Organization"
+      edge_types: ["PartOf"]
+    - source: "Project"
+      target: "Requirement"
+      edge_types: ["Requires"]
+    - source: "Technology"
+      target: "Project"
+      edge_types: ["PartOf"]
+    - source: "Event"
+      target: "Location"
+      edge_types: ["LocatedAt"]
+    - source: "Entity"
+      target: "Topic"
+      edge_types: ["RelatedToTopic"]
+    - source: "Entity"
+      target: "Procedure"
+      edge_types: ["FollowsProcedure"]

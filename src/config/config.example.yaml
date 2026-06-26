@@ -74,6 +74,10 @@ brain:
     provider: claude
     # Initial model id; null uses the selected backend default.
     model: null
+    # Claude only: bypass the Telegram permission gate entirely
+    # (SDK permission_mode=bypassPermissions, like `--dangerously-skip-permissions`).
+    # Only safe in an isolated/sandboxed environment. Default false.
+    dangerously_skip_permissions: false
     # Working directory for the agent's file access and project settings.
     working_path: /home/brain/workdir
     # Agent instructions; null would use the default i18n system prompt.

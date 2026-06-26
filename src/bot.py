@@ -14,6 +14,7 @@ and gathers every bot under one `asyncio.gather`.
 
 import asyncio
 import logging
+import os
 from functools import partial
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from .i18n import Translator
 from .infra.access_control import make_acl
 from .infra.agent_factory import create_agent_backend
 from .infra.commands import CommandDef, load_commands
+from .infra.graphiti_tool import GraphitiProxy, build_graphiti_server
 from .infra.interactions import TelegramInteractionGate
 from .infra.logs import BotLogs, setup_console
 from .infra.session_store import SessionStore
@@ -253,6 +255,34 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         else None
     )
 
+    # Per-chat Graphiti memory. The upstream HTTP MCP server partitions by
+    # group_id; this in-process proxy pins group_id=chat_id so chats behind a
+    # shared gateway can't read/write each other's graph. The raw upstream
+    # server must be disabled in the project MCP config (it is, in the vault's
+    # .claude/settings.json) or the isolation is bypassable. Set
+    # GRAPHITI_MCP_URL="" to turn the proxy off entirely.
+    graphiti_proxy: GraphitiProxy | None = None
+    graphiti_url = os.environ.get("GRAPHITI_MCP_URL", "http://graphiti:8000/mcp")
+    graphiti_host = os.environ.get("GRAPHITI_MCP_HOST", "localhost:8000")
+    if graphiti_url:
+        try:
+            graphiti_proxy = await GraphitiProxy.discover(graphiti_url, graphiti_host)
+        except Exception as e:
+            glog.warning(
+                "[%s] graphiti discovery failed (%s); memory disabled", cfg.name, e
+            )
+        else:
+            glog.info(
+                "[%s] graphiti memory: %d tools, per-chat group_id",
+                cfg.name,
+                len(graphiti_proxy.specs),
+            )
+    graphiti_server_factory = (
+        (lambda chat_id: build_graphiti_server(chat_id, graphiti_proxy))
+        if graphiti_proxy is not None
+        else None
+    )
+
     glog.info("[%s] agent_provider: %s", cfg.name, cfg.agent_provider)
     if cfg.agent_model:
         glog.info("[%s] agent_model: %s", cfg.name, cfg.agent_model)
@@ -264,6 +294,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         add_dirs=add_dirs,
         on_tool_event=tool_mirror.handle,
         task_server_factory=task_server_factory,
+        graphiti_server_factory=graphiti_server_factory,
     )
 
     transcriber = _make_transcriber(cfg, http, glog)

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, cast
 
@@ -70,7 +71,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
         on_tool_event: ToolEventCallback | None = None,
         initial_model: str | None = None,
         task_server_factory: Callable[[int], "McpSdkServerConfig | None"] | None = None,
+        graphiti_server_factory: (
+            Callable[[int], "McpSdkServerConfig | None"] | None
+        ) = None,
         lang: str = "en",
+        dangerously_skip_permissions: bool = False,
     ) -> None:
         """Configure prompt, cwd, model, hooks, and the per-chat client maps."""
         self._init_base(session_store, idle_ttl_sec)
@@ -82,9 +87,16 @@ class ClaudeAgentBackend(BaseAgentBackend):
         self._on_tool_event = on_tool_event
         self._initial_model = initial_model
         self._task_server_factory = task_server_factory
+        self._graphiti_server_factory = graphiti_server_factory
+        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._clients: dict[int, tuple[ClaudeSDKClient, float]] = {}
         self._modes: dict[int, str] = {}
         self._models: dict[int, str | None] = {}
+        # Ring buffer of the CLI's most recent stderr lines per chat. The SDK
+        # routes stderr to our callback but discards it from the ProcessError
+        # (its `.stderr` is a placeholder), so we keep a tail here to surface
+        # the real failure reason on a spawn error.
+        self._stderr_tail: dict[int, deque[str]] = {}
 
     def available_modes(self) -> tuple[str, ...]:
         """Return the permission modes offered for ``/mode``."""
@@ -101,6 +113,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
             entry = self._clients.pop(chat_id, None)
             self._modes.pop(chat_id, None)
             self._models.pop(chat_id, None)
+            self._stderr_tail.pop(chat_id, None)
             self._locks.pop(chat_id, None)
             if entry is None:
                 continue
@@ -127,7 +140,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
             ]
             | None
         ) = None
-        if self._on_permission is not None:
+        # bypassPermissions makes the SDK skip the gate callback entirely, so
+        # wiring one would be dead weight. Leave can_use_tool unset in that mode.
+        if self._on_permission is not None and not self._dangerously_skip_permissions:
             on_perm = self._on_permission
 
             async def _can_use_tool(
@@ -201,8 +216,10 @@ class ClaudeAgentBackend(BaseAgentBackend):
             }
 
         def _on_stderr(line: str) -> None:
-            """Log a line from the Claude CLI's stderr as a warning."""
-            log.warning("claude cli stderr (chat_id=%s): %s", chat_id, line.rstrip())
+            """Log a Claude CLI stderr line and keep it in the per-chat tail."""
+            text = line.rstrip()
+            log.warning("claude cli stderr (chat_id=%s): %s", chat_id, text)
+            self._stderr_tail.setdefault(chat_id, deque(maxlen=50)).append(text)
 
         # Per-chat scheduling tool, bound to this chat_id. Registered as an MCP
         # server; it stays callable without an allowlist and is auto-approved in
@@ -212,11 +229,23 @@ class ClaudeAgentBackend(BaseAgentBackend):
             server = self._task_server_factory(chat_id)
             if server is not None:
                 mcp_servers["tasks"] = server
+        # Per-chat Graphiti memory: the in-process proxy pins group_id=chat_id so
+        # chats can't read/write each other's graph. The raw upstream server must
+        # stay disabled in the project MCP config or this isolation is bypassable.
+        if self._graphiti_server_factory is not None:
+            gserver = self._graphiti_server_factory(chat_id)
+            if gserver is not None:
+                mcp_servers["graphiti-memory"] = gserver
 
         return ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             include_partial_messages=True,
             can_use_tool=can_use_tool,
+            permission_mode=(
+                "bypassPermissions"
+                if self._dangerously_skip_permissions
+                else "default"
+            ),
             cwd=self._cwd,
             add_dirs=list(self._add_dirs),
             setting_sources=["user", "project", "local"],
@@ -227,6 +256,28 @@ class ClaudeAgentBackend(BaseAgentBackend):
             stderr=_on_stderr,
             mcp_servers=cast(Any, mcp_servers),
         )
+
+    async def _enter_client(self, chat_id: int, client: ClaudeSDKClient) -> None:
+        """Start the SDK client, enriching a spawn failure with the CLI's stderr.
+
+        The SDK drops the real stderr from ``ProcessError`` (its ``.stderr`` is a
+        placeholder). We re-raise carrying the captured tail so the actual reason
+        (e.g. the root ``--dangerously-skip-permissions`` guard) reaches the
+        per-chat log instead of a generic "Check stderr output for details".
+        """
+        self._stderr_tail.pop(chat_id, None)
+        try:
+            await client.__aenter__()
+        except ProcessError as e:
+            tail = list(self._stderr_tail.get(chat_id, ()))
+            if not tail:
+                raise
+            joined = "\n".join(tail)
+            raise ProcessError(
+                f"claude CLI failed to start: {tail[-1]}",
+                exit_code=e.exit_code,
+                stderr=joined,
+            ) from e
 
     async def _get_client(self, chat_id: int) -> ClaudeSDKClient:
         """Return the chat's live client, resuming or minting a session as needed.
@@ -247,7 +298,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 options = self._make_options(chat_id, session_id=sid)
             client = ClaudeSDKClient(options=options)
             try:
-                await client.__aenter__()
+                await self._enter_client(chat_id, client)
             except ProcessError:
                 # Resume target is missing/corrupt (CLI exits 1: "No
                 # conversation found"). Drop it and mint a fresh session so the
@@ -264,7 +315,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 sid = (await self._store.create(chat_id)).id
                 options = self._make_options(chat_id, session_id=sid)
                 client = ClaudeSDKClient(options=options)
-                await client.__aenter__()
+                await self._enter_client(chat_id, client)
             if self._initial_model:
                 await client.set_model(self._initial_model)
                 self._models[chat_id] = self._initial_model
@@ -376,6 +427,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
         """Close and forget the live SDK client (caller holds the lock)."""
         self._modes.pop(chat_id, None)
         self._models.pop(chat_id, None)
+        self._stderr_tail.pop(chat_id, None)
         entry = self._clients.pop(chat_id, None)
         if entry is not None:
             client, _ = entry
