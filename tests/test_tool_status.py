@@ -59,6 +59,12 @@ def test_tool_display_adds_emoji_case_insensitively() -> None:
     assert _tool_display("Unknown") == "🔧 Unknown"
 
 
+def test_tool_display_shortens_mcp_names() -> None:
+    """MCP tools show as MCP:<tool>, dropping the mcp__<server>__ prefix."""
+    assert _tool_display("mcp__graphiti-memory__add_memory") == "🔧 MCP:add_memory"
+    assert _tool_display("mcp__tasks__task") == "🧩 MCP:task"
+
+
 def test_one_line_collapses_and_truncates() -> None:
     """one_line collapses whitespace and truncates with an ellipsis."""
     assert _one_line("hello\n   world", 20) == "hello world"

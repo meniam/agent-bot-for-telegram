@@ -335,7 +335,17 @@ def to_html(text: str) -> str:
 
 # Rich Messages render real HTML, so literal newlines collapse to whitespace.
 # `<pre>` keeps newlines significant; `<table>` rows/cells own their layout.
-_PRE_OR_TABLE_RE = re.compile(r"<pre>.*?</pre>|<table>.*?</table>", re.DOTALL)
+# `<pre>` keeps inner newlines; the others drop them (their children space
+# themselves). Galleries wrap several media tags separated by structural
+# newlines — left as `<br>` they corrupt the Rich Message, so strip them like a
+# table.
+_PRE_OR_TABLE_RE = re.compile(
+    r"<pre>.*?</pre>|<table>.*?</table>"
+    r"|<tg-collage>.*?</tg-collage>|<tg-slideshow>.*?</tg-slideshow>",
+    re.DOTALL,
+)
+# Segments whose inner newlines are structural (dropped), not paragraph breaks.
+_STRIP_INNER_NL = ("<table>", "<tg-collage>", "<tg-slideshow>")
 
 # Block-level tags own their vertical spacing when rendered as real HTML, so the
 # structural newlines `_render` emits around them must be dropped — turning them
@@ -345,7 +355,10 @@ _BLOCK_TAGS = (
     "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "li", "blockquote",
     "aside", "pre", "table", "tr", "th", "td", "thead", "tbody", "caption",
     "hr", "footer", "figure", "figcaption", "details", "summary",
-    "tg-math-block",
+    "tg-math-block", "tg-collage", "tg-slideshow",
+    # Media is standalone-block-only in Rich Messages; structural newlines around
+    # it must drop, not become <br> (which corrupts the media block).
+    "img", "video", "audio",
 )
 _BLOCK_TAG_ALT = "|".join(sorted(_BLOCK_TAGS, key=len, reverse=True))
 # A newline that directly follows a block tag's `>` or directly precedes a block
@@ -385,7 +398,7 @@ def to_rich_html(text: str) -> str:
             before = before.lstrip("\n")
         out.append(_breaks(before))
         seg = m.group(0)
-        out.append(seg.replace("\n", "") if seg.startswith("<table>") else seg)
+        out.append(seg.replace("\n", "") if seg.startswith(_STRIP_INNER_NL) else seg)
         pos = m.end()
     tail = converted[pos:]
     out.append(_breaks(tail.lstrip("\n") if pos else tail))

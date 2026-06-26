@@ -34,6 +34,33 @@ def test_rich_html_strips_table_newlines() -> None:
     assert "<br>" not in out
 
 
+def test_rich_html_gallery_has_no_inner_br() -> None:
+    """A gallery's media must not be separated by ``<br>`` (it corrupts it)."""
+    raw = (
+        "<tg-slideshow>\n"
+        '<img src="https://h/a.jpg"/>\n'
+        '<img src="https://h/b.jpg"/>\n'
+        "<figcaption>Cap</figcaption>\n"
+        "</tg-slideshow>"
+    )
+    out = to_rich_html(raw)
+    assert "<br>" not in out
+    assert (
+        out
+        == "<tg-slideshow>"
+        '<img src="https://h/a.jpg"/>'
+        '<img src="https://h/b.jpg"/>'
+        "<figcaption>Cap</figcaption></tg-slideshow>"
+    )
+
+
+def test_rich_html_standalone_images_have_no_br() -> None:
+    """Consecutive standalone media blocks render without ``<br>`` padding."""
+    out = to_rich_html("![A](https://h/a.jpg)\n\n![B](https://h/b.jpg)")
+    assert "<br>" not in out
+    assert out == '<img src="https://h/a.jpg"/><img src="https://h/b.jpg"/>'
+
+
 # --- to_html: inline formatting ---
 
 def test_bold() -> None:

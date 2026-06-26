@@ -92,9 +92,20 @@ def _one_line(text: str, limit: int = _STATUS_LINE_MAX) -> str:
 
 
 def _tool_display(tool_name: str) -> str:
-    """Prefix the tool name with its emoji (a wrench for unknown tools)."""
-    emoji = _TOOL_EMOJI.get(tool_name.replace("_", "").replace("-", "").lower(), "🔧")
-    return f"{emoji} {tool_name}"
+    """Prefix the tool name with its emoji (a wrench for unknown tools).
+
+    MCP tools arrive as ``mcp__<server>__<tool>``; show them compactly as
+    ``MCP:<tool>`` and pick the emoji from the bare tool name.
+    """
+    label = tool_name
+    emoji_key = tool_name
+    if tool_name.startswith("mcp__"):
+        parts = tool_name[len("mcp__") :].split("__", 1)
+        bare = parts[1] if len(parts) == 2 else parts[0]
+        label = f"MCP:{bare}"
+        emoji_key = bare
+    emoji = _TOOL_EMOJI.get(emoji_key.replace("_", "").replace("-", "").lower(), "🔧")
+    return f"{emoji} {label}"
 
 
 def _tool_input_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
