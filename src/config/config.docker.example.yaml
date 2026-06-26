@@ -43,6 +43,8 @@ brain:
     dir: /app/var/brain/tasks
     scripts_dir: /app/var/brain/scripts
     tick_interval_sec: 60
+    # Rewritten each tick; read by the container HEALTHCHECK (infra.healthcheck).
+    heartbeat_path: /app/var/scheduler_heartbeat
     max_output_chars: 4000
     script_timeout_sec: 300
     history_limit: 100

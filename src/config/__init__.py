@@ -31,6 +31,7 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
         "dir": "tasks_dir",
         "scripts_dir": "tasks_scripts_dir",
         "tick_interval_sec": "tasks_tick_interval_sec",
+        "heartbeat_path": "tasks_heartbeat_path",
         "max_output_chars": "tasks_max_output_chars",
         "script_timeout_sec": "tasks_script_timeout_sec",
         "history_limit": "tasks_history_limit",
@@ -203,6 +204,9 @@ class BotConfig(BaseModel):
     # Directory holding runnable *.sh/*.py task scripts. None disables scripts.
     tasks_scripts_dir: str | None = None
     tasks_tick_interval_sec: int = 60
+    # File the scheduler rewrites each tick for liveness checks (see
+    # `infra.healthcheck`). None disables heartbeat writes.
+    tasks_heartbeat_path: str | None = None
     tasks_max_output_chars: int = 4000
     tasks_script_timeout_sec: int = 300
     tasks_history_limit: int = 100
@@ -402,6 +406,12 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         tsd.mkdir(parents=True, exist_ok=True)
         tasks_scripts_dir = str(tsd)
 
+    # Heartbeat file: resolved like other paths but not created here (the
+    # scheduler makes its parent on first write). None leaves heartbeat off.
+    tasks_heartbeat_path = data.get("tasks_heartbeat_path")
+    if tasks_heartbeat_path:
+        tasks_heartbeat_path = str(_resolve_path(tasks_heartbeat_path, base_dir))
+
     raw_allowed_tools = data.get("tasks_allowed_tools")
     if raw_allowed_tools is None:
         tasks_allowed_tools: tuple[str, ...] | None = None
@@ -463,6 +473,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "allowed_for_all": raw_for_all,
         "tasks_dir": tasks_dir,
         "tasks_scripts_dir": tasks_scripts_dir,
+        "tasks_heartbeat_path": tasks_heartbeat_path,
         "tasks_allowed_tools": tasks_allowed_tools,
     }
     if raw_groq:

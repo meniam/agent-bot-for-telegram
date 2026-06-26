@@ -5,8 +5,10 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from src.config import BotConfig
+from src.infra.healthcheck import check
 from src.infra.task_scheduler import TaskScheduler
 from src.infra.task_store import TaskStore, new_task_id
 from src.infra.task_types import Task, TaskRepeat, TaskSchedule
@@ -47,9 +49,16 @@ def _cfg(**over: object) -> BotConfig:
 
 
 def _sched(
-    tmp_path: Path, runner: _RecordingRunner, cfg: BotConfig
+    tmp_path: Path,
+    runner: _RecordingRunner,
+    cfg: BotConfig,
+    **extra: Any,
 ) -> tuple[TaskScheduler, TaskStore]:
-    """Build a TaskScheduler with a fresh store and a fixed clock."""
+    """Build a TaskScheduler with a fresh store and a fixed clock.
+
+    Extra keyword args (e.g. ``heartbeat_path``, ``on_loop_death``) pass through
+    to the scheduler constructor.
+    """
     store = TaskStore(tmp_path)
     sched = TaskScheduler(
         store=store,
@@ -59,6 +68,7 @@ def _sched(
         is_allowed=cfg_is_allowed(cfg),
         tick_interval=60,
         now_fn=lambda: NOW,
+        **extra,
     )
     return sched, store
 
@@ -274,3 +284,70 @@ async def test_recent_interval_runs_once(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == [t.id]
+
+
+# --- heartbeat + loop-death watchdog -----------------------------------------
+
+
+async def test_heartbeat_written_and_read_as_fresh(tmp_path: Path) -> None:
+    """The scheduler writes an ISO timestamp the healthcheck reads as ``ok``."""
+    hb = tmp_path / "scheduler_heartbeat"
+    sched, _ = _sched(tmp_path, _RecordingRunner(), _cfg(), heartbeat_path=hb)
+
+    await sched._write_heartbeat()
+
+    assert hb.read_text() == NOW.isoformat()
+    status, age = check(hb, max_age=120.0, now=NOW)
+    assert status == "ok"
+    assert age == 0.0
+
+
+async def test_heartbeat_noop_without_path(tmp_path: Path) -> None:
+    """With no heartbeat path the write is a silent no-op (no file)."""
+    sched, _ = _sched(tmp_path, _RecordingRunner(), _cfg())
+    await sched._write_heartbeat()
+    assert not (tmp_path / "scheduler_heartbeat").exists()
+
+
+async def test_loop_death_fires_alert(tmp_path: Path) -> None:
+    """An unexpected loop exit awaits the death notifier with the cause."""
+    deaths: list[BaseException] = []
+
+    async def on_death(exc: BaseException) -> None:
+        deaths.append(exc)
+
+    sched, _ = _sched(tmp_path, _RecordingRunner(), _cfg(), on_loop_death=on_death)
+
+    class _Boom(BaseException):
+        """Not an ``Exception``, so the loop's ``except Exception`` can't eat it."""
+
+    async def _boom() -> None:
+        raise _Boom("dead")
+
+    sched.tick = _boom  # type: ignore[method-assign]
+    sched.start()
+    for _ in range(20):
+        if deaths:
+            break
+        await asyncio.sleep(0)
+
+    assert sched._loop_task is not None and sched._loop_task.done()
+    assert len(deaths) == 1
+    assert isinstance(deaths[0], _Boom)
+
+
+async def test_stop_does_not_alert(tmp_path: Path) -> None:
+    """Stopping the scheduler is not mistaken for a loop death."""
+    deaths: list[BaseException] = []
+
+    async def on_death(exc: BaseException) -> None:
+        deaths.append(exc)
+
+    sched, _ = _sched(tmp_path, _RecordingRunner(), _cfg(), on_loop_death=on_death)
+    sched.start()
+    await asyncio.sleep(0)
+    await sched.stop()
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert deaths == []

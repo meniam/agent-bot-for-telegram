@@ -16,8 +16,11 @@ handling on restart lives in `_pick_next_run` (Phase 6).
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
+import os
+import tempfile
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from pathlib import Path
 
 from ..config import BotConfig, is_admin
 from .task_runner import TaskRunner
@@ -48,8 +51,15 @@ class TaskScheduler:
         is_allowed: Callable[[int], bool],
         tick_interval: int = 60,
         now_fn: Callable[[], datetime] | None = None,
+        heartbeat_path: Path | None = None,
+        on_loop_death: Callable[[BaseException], Awaitable[None]] | None = None,
     ) -> None:
-        """Wire the scheduler to its store, runner, config, and access check."""
+        """Wire the scheduler to its store, runner, config, and access check.
+
+        ``heartbeat_path`` (optional) is rewritten after every loop pass for
+        liveness checks. ``on_loop_death`` (optional) is awaited if the loop
+        ends unexpectedly (crash or external cancel — not via ``stop()``).
+        """
         self._store = store
         self._runner = runner
         self._cfg = cfg
@@ -57,30 +67,73 @@ class TaskScheduler:
         self._is_allowed = is_allowed
         self._tick = max(1, tick_interval)
         self._now = now_fn or (lambda: datetime.now().astimezone())
+        self._heartbeat_path = heartbeat_path
+        self._on_loop_death = on_loop_death
         self._running: set[str] = set()
         self._inflight: set[asyncio.Task[None]] = set()
         self._loop_task: asyncio.Task[None] | None = None
+        # Set by stop() so the done-callback can tell an intentional shutdown
+        # from an unexpected death.
+        self._stopping = False
 
     def start(self) -> None:
         """Start the background tick loop (idempotent)."""
         if self._loop_task is None:
+            self._stopping = False
             self._loop_task = asyncio.create_task(self._loop())
+            self._loop_task.add_done_callback(self._on_loop_done)
             self._glog.info("[%s] task scheduler started", self._cfg.name)
 
     async def stop(self) -> None:
         """Cancel and await the tick loop (idempotent)."""
         if self._loop_task is None:
             return
+        self._stopping = True
         self._loop_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self._loop_task
         self._loop_task = None
 
+    def _on_loop_done(self, task: asyncio.Task[None]) -> None:
+        """Done-callback: alert if the loop ended without going through ``stop()``.
+
+        The loop is infinite, so any completion that isn't our own cancellation
+        is a fault — log ERROR and fire the optional async notifier.
+        """
+        if self._stopping:
+            return
+        if task.cancelled():
+            exc: BaseException = asyncio.CancelledError("scheduler loop cancelled")
+        else:
+            caught = task.exception()
+            if caught is None:
+                return  # infinite loop returned cleanly — shouldn't happen, no-op
+            exc = caught
+        self._glog.error(
+            "[%s] task scheduler loop died: %r", self._cfg.name, exc
+        )
+        if self._on_loop_death is not None:
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().create_task(self._notify_death(exc))
+
+    async def _notify_death(self, exc: BaseException) -> None:
+        """Await the death notifier, swallowing its failures."""
+        assert self._on_loop_death is not None
+        try:
+            await self._on_loop_death(exc)
+        except Exception:
+            self._glog.exception(
+                "[%s] scheduler loop-death notify failed", self._cfg.name
+            )
+
     async def _loop(self) -> None:
         """Tick forever, sleeping ``tick_interval`` between passes.
 
         A failed tick is logged and the loop continues; cancellation propagates.
+        The heartbeat is refreshed after every pass (success or caught error) so
+        it proves the loop is cycling, not that any one tick succeeded.
         """
+        await self._write_heartbeat()  # mark alive before the first tick
         while True:
             try:
                 await self.tick()
@@ -88,7 +141,41 @@ class TaskScheduler:
                 raise
             except Exception:
                 self._glog.exception("[%s] task scheduler tick failed", self._cfg.name)
+            await self._write_heartbeat()
             await asyncio.sleep(self._tick)
+
+    async def _write_heartbeat(self) -> None:
+        """Rewrite the heartbeat file with the current time (best-effort)."""
+        if self._heartbeat_path is None:
+            return
+        stamp = self._now().isoformat()
+        try:
+            await asyncio.to_thread(self._write_heartbeat_sync, stamp)
+        except Exception:
+            # A heartbeat write must never take the loop down; staleness will
+            # surface the problem via the healthcheck instead.
+            self._glog.warning(
+                "[%s] heartbeat write failed", self._cfg.name, exc_info=True
+            )
+
+    def _write_heartbeat_sync(self, stamp: str) -> None:
+        """Atomically replace the heartbeat file (temp + rename, no fsync).
+
+        Durability is irrelevant — only the latest value matters — so fsync is
+        skipped, but the atomic rename still prevents readers seeing a partial
+        write.
+        """
+        path = self._heartbeat_path
+        assert path is not None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".hb_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(stamp)
+            Path(tmp).replace(path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     async def tick(self) -> None:
         """Run one scheduler pass (also callable directly from tests)."""

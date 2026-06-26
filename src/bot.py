@@ -13,6 +13,7 @@ and gathers every bot under one `asyncio.gather`.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 from functools import partial
@@ -345,6 +346,19 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             log_for_chat=bot_logs.for_chat,
             workdir_lock=workdir_lock,
         )
+        async def _alert_loop_death(exc: BaseException) -> None:
+            """Push a scheduler-death alert to every admin chat (best-effort)."""
+            text = (
+                f"⚠️ Task scheduler loop died: "
+                f"{type(exc).__name__}: {exc}".strip()
+            )
+            for admin_id in cfg.admin_chat_ids:
+                with contextlib.suppress(Exception):
+                    await send_md_to_chat(bot, admin_id, text)
+
+        heartbeat_path = (
+            Path(cfg.tasks_heartbeat_path) if cfg.tasks_heartbeat_path else None
+        )
         scheduler = TaskScheduler(
             store=tasks,
             runner=runner,
@@ -352,6 +366,8 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             glog=glog,
             is_allowed=is_allowed,
             tick_interval=cfg.tasks_tick_interval_sec,
+            heartbeat_path=heartbeat_path,
+            on_loop_death=_alert_loop_death,
         )
         scheduler.start()
 

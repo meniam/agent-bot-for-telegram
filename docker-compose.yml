@@ -38,6 +38,32 @@ services:
 
       # Persistent bot state (logs, message DBs, tasks, commands, uploads).
       - ./var:/app/var
+    healthcheck:
+      # Scheduler liveness: exits 1 (unhealthy) when the heartbeat the scheduler
+      # rewrites each tick is missing or older than 120s.
+      test: ['CMD', 'python', '-m', 'src.infra.healthcheck']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # First heartbeat lands within one tick (60s); don't fail before then.
+      start_period: 90s
+    labels:
+      # The autoheal sidecar restarts containers it finds unhealthy — compose's
+      # `restart` policy reacts to exit, not to health status.
+      - autoheal=true
+
+  # Restarts any container labelled `autoheal=true` once Docker marks it
+  # unhealthy. Needs the Docker socket; drop this service if you prefer to act
+  # on the unhealthy status manually (it is visible in `docker compose ps`).
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: abt-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=15
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # Temporal knowledge-graph memory. The bot's Claude agent reaches it as an
   # MCP server over HTTP (see /vault/.mcp.json -> http://graphiti:8000/mcp/).
