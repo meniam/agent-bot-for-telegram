@@ -929,7 +929,7 @@ async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
     backend = ClaudeAgentBackend(store, system_prompt="x")
     out = await backend.ask_ephemeral(123, "hi", allowed_tools=("Read",))
 
-    assert out == "done"
+    assert out.text == "done"
     # The chat's live session / current pointer must be unchanged.
     assert await store.current_id(123) == before
     assert backend.has_session(123) is False  # no live client spun up
@@ -940,6 +940,51 @@ async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
     deny = await can_use("Bash", {}, None)
     assert type(allow).__name__ == "PermissionResultAllow"
     assert type(deny).__name__ == "PermissionResultDeny"
+
+
+async def test_ask_ephemeral_captures_tools_and_text(monkeypatch: Any) -> None:
+    """Verify ask_ephemeral records tool calls (with error flag) from the stream."""
+    from claude_agent_sdk import (
+        AssistantMessage,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+
+    import src.infra.claude_agent as claude_module
+
+    async def _fake_query(*, prompt: str, options: Any) -> Any:
+        """Yield a tool-use turn, its (failed) result, then a text answer."""
+        _ = (prompt, options)
+        yield AssistantMessage(
+            content=[ToolUseBlock(id="t1", name="Bash", input={"command": "ls"})],
+            model="m",
+        )
+        yield UserMessage(
+            content=[ToolResultBlock(tool_use_id="t1", content="boom", is_error=True)]
+        )
+        yield AssistantMessage(content=[TextBlock(text="done")], model="m")
+
+    monkeypatch.setattr(claude_module, "query", _fake_query)
+
+    backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
+    out = await backend.ask_ephemeral(5, "hi", allowed_tools=("Bash",))
+
+    assert out.text == "done"
+    assert len(out.tool_events) == 1
+    assert out.tool_events[0]["tool"] == "Bash"
+    assert out.tool_events[0]["is_error"] is True
+
+
+def test_transcript_path_derives_from_cwd() -> None:
+    """The jsonl transcript path is derived from the cwd and session id."""
+    backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
+    path = backend._transcript_path("abc123")
+    assert path is not None
+    assert path.endswith("/.claude/projects/-vault/abc123.jsonl")
+    # No session id (or no cwd) yields no path.
+    assert backend._transcript_path(None) is None
 
 
 async def test_ask_ephemeral_not_supported_on_codex() -> None:

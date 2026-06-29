@@ -18,9 +18,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ..config import BotConfig
 from .agent import AgentBackend
+from .agent_types import EphemeralResult
 from .task_store import TaskStore
 from .task_types import RunStatus, Task, TaskRun
 
@@ -51,6 +53,10 @@ class RunOutcome:
     started_at: datetime
     finished_at: datetime
     delivered_to: list[int] = field(default_factory=list)
+    # LLM runs only: transcript pointer + the tools/skills the model invoked.
+    session_id: str | None = None
+    transcript_path: str | None = None
+    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class TaskRunner:
@@ -112,14 +118,17 @@ class TaskRunner:
                     started_at=started,
                     finished_at=self._now(),
                 )
-            output = await self._run_llm(task)
+            result = await self._run_llm(task)
             return RunOutcome(
                 status="ok",
-                output=output,
+                output=result.text,
                 error=None,
                 exit_code=None,
                 started_at=started,
                 finished_at=self._now(),
+                session_id=result.session_id,
+                transcript_path=result.transcript_path,
+                tool_events=result.tool_events,
             )
         except Exception as e:  # isolate one task; never crash the loop
             cl.exception("task %s failed: %s", task.id, e)
@@ -218,8 +227,8 @@ class TaskRunner:
 
     # ----- LLM execution (filled in Phase 4) -------------------------------
 
-    async def _run_llm(self, task: Task) -> str:
-        """Run the task's prompt as an ephemeral agent turn and return its reply.
+    async def _run_llm(self, task: Task) -> EphemeralResult:
+        """Run the task's prompt as an ephemeral agent turn and return its result.
 
         Uses the configured ``tasks.allowed_tools`` or, when unset, the
         read-only `DEFAULT_ALLOWED_TOOLS`. Raises ValueError on a missing prompt.
@@ -262,7 +271,7 @@ class TaskRunner:
         return delivered
 
     async def _record(self, task: Task, outcome: RunOutcome) -> None:
-        """Build a `TaskRun` from the outcome and append it to history."""
+        """Build a `TaskRun` from the outcome, append history, write the tool log."""
         run = TaskRun(
             task_id=task.id,
             scope=task.scope,
@@ -277,5 +286,17 @@ class TaskRunner:
             output=outcome.output,
             error=outcome.error,
             delivered_to=outcome.delivered_to,
+            session_id=outcome.session_id,
+            transcript_path=outcome.transcript_path,
         )
         await self._store.append_history(run)
+        # For LLM runs, drop a tool/skill activity log next to the run record so
+        # it can be inspected alongside the task history.
+        if outcome.session_id is not None or outcome.tool_events:
+            await self._store.append_tool_log(
+                task.id,
+                outcome.started_at,
+                session_id=outcome.session_id,
+                transcript_path=outcome.transcript_path,
+                events=outcome.tool_events,
+            )

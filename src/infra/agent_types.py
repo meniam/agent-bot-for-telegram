@@ -5,7 +5,7 @@ classes. Provider adapters keep Claude / Codex / PI wire details inside infra.
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -23,6 +23,21 @@ class StreamChunk:
 
     kind: Literal["text", "thinking"]
     text: str
+
+
+@dataclass(slots=True)
+class EphemeralResult:
+    """Outcome of an ephemeral (scheduled-task) turn: reply plus run metadata.
+
+    ``session_id`` / ``transcript_path`` point at the SDK jsonl transcript for
+    later analysis; ``tool_events`` lists each tool/skill the model invoked
+    (``{"tool", "input", "is_error"}``), used to write the per-run tool log.
+    """
+
+    text: str
+    session_id: str | None = None
+    transcript_path: str | None = None
+    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentTurnReset(RuntimeError):
@@ -72,12 +87,13 @@ class AgentBackend(Protocol):
 
     async def ask_ephemeral(
         self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
-    ) -> str:
+    ) -> EphemeralResult:
         """One-shot turn in a throwaway session (for scheduled LLM tasks).
 
         Must not mutate the chat's live session or ``current`` pointer.
         Permissions are non-interactive: only ``allowed_tools`` are permitted.
-        Backends without a stateless turn primitive may raise
+        Returns the reply text plus run metadata (session id, transcript path,
+        tool events). Backends without a stateless turn primitive may raise
         ``NotImplementedError`` (Codex and PI currently do).
         """
         ...

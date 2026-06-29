@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from .agent_base import BaseAgentBackend
-from .agent_types import AgentEventStreamTimeout, AgentTurnReset, StreamChunk, ToolEventCallback
+from .agent_types import (
+    AgentEventStreamTimeout,
+    AgentTurnReset,
+    EphemeralResult,
+    StreamChunk,
+    ToolEventCallback,
+)
 from .session_store import SessionStore
 
 log = logging.getLogger(__name__)
@@ -739,7 +745,7 @@ class PiAgentBackend(BaseAgentBackend):
 
     async def ask_ephemeral(
         self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
-    ) -> str:
+    ) -> EphemeralResult:
         """Raise ``NotImplementedError``; PI has no stateless-turn primitive."""
         _ = (chat_id, prompt, allowed_tools)
         raise NotImplementedError("PI backend has no ephemeral-session turn")
