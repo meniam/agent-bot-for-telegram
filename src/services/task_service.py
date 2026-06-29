@@ -12,7 +12,7 @@ from datetime import datetime
 
 from ..config import BotConfig, is_admin
 from ..infra.task_store import TaskStore, new_task_id
-from ..infra.task_types import Task, TaskScope, compute_next_run, parse_schedule
+from ..infra.task_types import Task, TaskRun, TaskScope, compute_next_run, parse_schedule
 
 # Prompt-injection / dangerous-command patterns, scanned on every LLM task
 # prompt at create time. Ported from Hermes' cron scanner (strict set): a
@@ -142,6 +142,12 @@ class TaskService:
         if task is None or not self._visible(task, chat_id, admin=admin):
             raise TaskNotFoundError(task_id or "?")
         return task
+
+    async def last_run(self, chat_id: int, task_id: str) -> TaskRun | None:
+        """Return the most recent run record for a visible task, or None if none."""
+        task = await self.get(chat_id, task_id)  # permission-checked
+        runs = await self._store.list_history(task.id)
+        return runs[-1] if runs else None
 
     async def act(self, chat_id: int, action: str, task_id: str) -> Task:
         """Apply a state action (show/pause/resume/run/rm) to a visible task."""

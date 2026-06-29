@@ -295,10 +295,10 @@ class TaskStore:
 
     def _copy_transcript_sync(
         self, task_id: str, started_at: datetime, src: Path
-    ) -> None:
+    ) -> Path | None:
         if not src.is_file():
             log.warning("task store: transcript not found, skipping copy: %s", src)
-            return
+            return None
         hdir = self._history_dir(task_id)
         hdir.mkdir(parents=True, exist_ok=True)
         self._secure_dir(hdir)
@@ -313,13 +313,16 @@ class TaskStore:
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+        return dst
 
     async def copy_transcript(
         self, task_id: str, started_at: datetime, src: Path
-    ) -> None:
-        """Copy the run's SDK jsonl transcript next to its history record."""
+    ) -> Path | None:
+        """Copy the run's SDK jsonl transcript next to its record; return its path."""
         async with self._lock:
-            await asyncio.to_thread(self._copy_transcript_sync, task_id, started_at, src)
+            return await asyncio.to_thread(
+                self._copy_transcript_sync, task_id, started_at, src
+            )
 
     def _list_history_sync(self, task_id: str) -> list[TaskRun]:
         hdir = self._history_dir(task_id)

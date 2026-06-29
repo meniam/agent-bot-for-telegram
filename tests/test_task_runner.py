@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.config import BotConfig
+from src.infra.agent_types import EphemeralResult
 from src.infra.task_runner import TaskRunner, broadcast_targets
 from src.infra.task_store import TaskStore, new_task_id
 from src.infra.task_types import Task, TaskSchedule
@@ -21,6 +22,23 @@ class _FakeBot:
     async def deliver(self, chat_id: int, output: str) -> None:
         """Record a delivery to the given chat."""
         self.sent.append((chat_id, output))
+
+
+class _FakeAgent:
+    """Agent stub whose ephemeral run points at a canned transcript file."""
+
+    def __init__(self, transcript: Path) -> None:
+        """Store the transcript path the ephemeral result should reference."""
+        self._transcript = transcript
+
+    async def ask_ephemeral(
+        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+    ) -> EphemeralResult:
+        """Return a canned result carrying the session id and transcript path."""
+        _ = (chat_id, prompt, allowed_tools)
+        return EphemeralResult(
+            text="answer", session_id="sess-1", transcript_path=str(self._transcript)
+        )
 
 
 def _cfg(tmp_path: Path, **over: object) -> BotConfig:
@@ -131,3 +149,55 @@ async def test_history_written(tmp_path: Path) -> None:
     runs = await store.list_history(task.id)
     assert len(runs) == 1
     assert runs[0].status == "ok"
+
+
+async def test_llm_run_copies_transcript_and_records_log_path(tmp_path: Path) -> None:
+    """An LLM run copies the SDK transcript and records its path as log_path."""
+    cfg = _cfg(tmp_path)
+    bot = _FakeBot()
+    store = TaskStore(tmp_path / "tasks")
+    src = tmp_path / "orig.jsonl"
+    src.write_text('{"type": "result"}\n', encoding="utf-8")
+    runner = TaskRunner(
+        deliver=bot.deliver,
+        cfg=cfg,
+        store=store,
+        agent=_FakeAgent(src),  # type: ignore[arg-type]
+        log_for_chat=lambda _cid: logging.getLogger("test"),
+        workdir_lock=asyncio.Lock(),
+    )
+    task = Task(
+        id=new_task_id(),
+        owner_chat_id=10,
+        scope="user",
+        kind="llm",
+        prompt="research X",
+        schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+    outcome = await runner.run(task)
+    assert outcome.status == "ok"
+
+    runs = await store.list_history(task.id)
+    assert len(runs) == 1
+    assert runs[0].session_id == "sess-1"
+    log_path = runs[0].log_path
+    assert log_path is not None
+
+    # log_path is the copied file: in the task's history dir, a .jsonl, same bytes.
+    def _inspect() -> tuple[bool, str, str, str, str]:
+        """Read the copied file's facts off the event loop (ASYNC240)."""
+        copied = Path(log_path)
+        return (
+            copied.is_file(),
+            copied.parent.name,
+            copied.suffix,
+            copied.read_text(encoding="utf-8"),
+            src.read_text(encoding="utf-8"),
+        )
+
+    is_file, parent, suffix, copied_text, src_text = await asyncio.to_thread(_inspect)
+    assert is_file
+    assert parent == task.id
+    assert suffix == ".jsonl"
+    assert copied_text == src_text

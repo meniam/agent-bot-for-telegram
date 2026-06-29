@@ -120,6 +120,53 @@ async def test_pause_run_rm_roundtrip(tmp_path: Path) -> None:
     assert _payload(await handle({"action": "list"}))["tasks"] == []
 
 
+async def test_show_returns_last_run_log_path(tmp_path: Path) -> None:
+    """Show surfaces the latest run's log path and session id."""
+    from datetime import UTC, datetime
+
+    from src.infra.task_types import TaskRun
+
+    store = TaskStore(tmp_path)
+    svc = TaskService(store, _cfg())
+    handle = make_task_handler(USER, svc)
+
+    task_id = _payload(
+        await handle({"action": "create", "schedule": "2m", "prompt": "research X"})
+    )["task"]["id"]
+
+    when = datetime(2026, 1, 1, tzinfo=UTC)
+    await store.append_history(
+        TaskRun(
+            task_id=task_id,
+            scope="user",
+            kind="llm",
+            started_at=when,
+            finished_at=when,
+            duration_ms=5,
+            status="ok",
+            session_id="sess-9",
+            log_path=f"/app/var/brain/tasks/history/{task_id}/run.jsonl",
+        )
+    )
+
+    out = _payload(await handle({"action": "show", "task_id": task_id}))
+    assert out["success"] is True
+    assert out["last_run"]["session_id"] == "sess-9"
+    assert out["last_run"]["status"] == "ok"
+    assert out["last_run"]["log_path"].endswith(f"{task_id}/run.jsonl")
+
+
+async def test_show_without_runs_omits_last_run(tmp_path: Path) -> None:
+    """Show on a never-run task omits the last_run block."""
+    handle = _handler(tmp_path)
+    task_id = _payload(
+        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
+    )["task"]["id"]
+    out = _payload(await handle({"action": "show", "task_id": task_id}))
+    assert out["success"] is True
+    assert "last_run" not in out
+
+
 async def test_unknown_action(tmp_path: Path) -> None:
     """An unknown action returns an error."""
     handle = _handler(tmp_path)

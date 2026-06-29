@@ -111,10 +111,11 @@ class TaskRun(BaseModel):
     output: str = ""
     error: str | None = None
     delivered_to: list[int] = Field(default_factory=list)
-    # LLM runs only: the SDK session id and a best-effort path to its jsonl
-    # transcript, recorded for later analysis. None for script runs.
+    # LLM runs only: the SDK session id and the full path to the jsonl
+    # transcript copied next to this record, for later analysis. None for
+    # script runs (or when the transcript could not be located).
     session_id: str | None = None
-    transcript_path: str | None = None
+    log_path: str | None = None
 
 
 _DURATION_RE = re.compile(r"^(\d+)\s*(m|min|mins|minute|minutes|h|hour|hours|d|day|days)$")

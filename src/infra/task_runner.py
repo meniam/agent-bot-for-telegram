@@ -268,7 +268,17 @@ class TaskRunner:
         return delivered
 
     async def _record(self, task: Task, outcome: RunOutcome) -> None:
-        """Build a `TaskRun` from the outcome, append history, write the tool log."""
+        """Copy the run's transcript, then build and append its `TaskRun` record."""
+        # For LLM runs, copy the SDK jsonl transcript next to the run record so
+        # the full session (tools, inputs, outputs) is inspectable alongside it;
+        # the copied path is what we persist as ``log_path``.
+        log_path: str | None = None
+        if outcome.transcript_path:
+            dst = await self._store.copy_transcript(
+                task.id, outcome.started_at, Path(outcome.transcript_path)
+            )
+            if dst is not None:
+                log_path = str(dst)
         run = TaskRun(
             task_id=task.id,
             scope=task.scope,
@@ -284,12 +294,6 @@ class TaskRunner:
             error=outcome.error,
             delivered_to=outcome.delivered_to,
             session_id=outcome.session_id,
-            transcript_path=outcome.transcript_path,
+            log_path=log_path,
         )
         await self._store.append_history(run)
-        # For LLM runs, copy the SDK jsonl transcript next to the run record so
-        # the full session (tools, inputs, outputs) is inspectable alongside it.
-        if outcome.transcript_path:
-            await self._store.copy_transcript(
-                task.id, outcome.started_at, Path(outcome.transcript_path)
-            )

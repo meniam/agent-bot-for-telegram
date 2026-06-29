@@ -110,7 +110,25 @@ def make_task_handler(
             if action == "list":
                 tasks = await service.list(chat_id)
                 return _ok({"tasks": [_fmt_task(t) for t in tasks]})
-            if action in ("show", "pause", "resume", "run", "rm"):
+            if action == "show":
+                task_id = str(args.get("task_id") or "").strip()
+                if not task_id:
+                    return _err("task_id is required for show")
+                task = await service.act(chat_id, "show", task_id)
+                last = await service.last_run(chat_id, task_id)
+                payload: dict[str, Any] = {
+                    "task": _fmt_task(task),
+                    "message": f"Task {task.id}: show ok.",
+                }
+                if last is not None:
+                    payload["last_run"] = {
+                        "status": last.status,
+                        "finished_at": last.finished_at.isoformat(),
+                        "session_id": last.session_id,
+                        "log_path": last.log_path,
+                    }
+                return _ok(payload)
+            if action in ("pause", "resume", "run", "rm"):
                 task_id = str(args.get("task_id") or "").strip()
                 if not task_id:
                     return _err(f"task_id is required for {action}")
