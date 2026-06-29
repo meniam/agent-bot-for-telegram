@@ -84,15 +84,25 @@ class AgentBackend(Protocol):
         ...
 
     async def ask_ephemeral(
-        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        allowed_tools: tuple[str, ...],
+        on_session_path: "Callable[[str], None] | None" = None,
     ) -> EphemeralResult:
         """One-shot turn in a throwaway session (for scheduled LLM tasks).
 
         Must not mutate the chat's live session or ``current`` pointer.
-        Permissions are non-interactive: only ``allowed_tools`` are permitted.
-        Returns the reply text plus run metadata (session id, transcript path,
-        tool events). Backends without a stateless turn primitive may raise
-        ``NotImplementedError`` (Codex and PI currently do).
+        Permissions are non-interactive: in a sandbox the run mirrors the
+        interactive posture (all tools/skills/MCP, no prompt); otherwise only
+        ``allowed_tools`` are permitted and the rest are denied silently.
+        Returns the reply text plus run metadata (session id, transcript path).
+        ``on_session_path`` (optional) is called once with the live provider
+        transcript path as soon as the session id is known, so a caller can
+        surface a tail-able log while the run is still in flight. Backends
+        without a stateless turn primitive may raise ``NotImplementedError``
+        (Codex and PI currently do).
         """
         ...
 

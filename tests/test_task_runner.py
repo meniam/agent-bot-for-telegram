@@ -32,10 +32,17 @@ class _FakeAgent:
         self._transcript = transcript
 
     async def ask_ephemeral(
-        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        allowed_tools: tuple[str, ...],
+        on_session_path=None,  # noqa: ANN001 - test stub
     ) -> EphemeralResult:
-        """Return a canned result carrying the session id and transcript path."""
+        """Emit a live transcript path, then return a canned result."""
         _ = (chat_id, prompt, allowed_tools)
+        if on_session_path is not None:
+            on_session_path(f"/live/{self._transcript.name}")
         return EphemeralResult(
             text="answer", session_id="sess-1", transcript_path=str(self._transcript)
         )
@@ -201,3 +208,53 @@ async def test_llm_run_copies_transcript_and_records_log_path(tmp_path: Path) ->
     assert parent == task.id
     assert suffix == ".jsonl"
     assert copied_text == src_text
+
+
+async def test_llm_run_publishes_live_log_then_clears(tmp_path: Path) -> None:
+    """The runner publishes the live transcript path mid-run, then clears it."""
+    cfg = _cfg(tmp_path)
+    bot = _FakeBot()
+    store = TaskStore(tmp_path / "tasks")
+    running_logs: dict[str, str] = {}
+    mid: dict[str, str] = {}
+
+    class _ObservingAgent:
+        """Emits a live path, then snapshots what the runner stored mid-run."""
+
+        async def ask_ephemeral(
+            self,
+            chat_id: int,
+            prompt: str,
+            *,
+            allowed_tools: tuple[str, ...],
+            on_session_path=None,  # noqa: ANN001 - test stub
+        ) -> EphemeralResult:
+            """Publish a live path and capture the shared map's state."""
+            _ = (chat_id, prompt, allowed_tools)
+            if on_session_path is not None:
+                on_session_path("/live/run.jsonl")
+            mid.update(running_logs)  # runner has stored it by now
+            return EphemeralResult(text="a", session_id="s", transcript_path=None)
+
+    runner = TaskRunner(
+        deliver=bot.deliver,
+        cfg=cfg,
+        store=store,
+        agent=_ObservingAgent(),  # type: ignore[arg-type]
+        log_for_chat=lambda _cid: logging.getLogger("test"),
+        workdir_lock=asyncio.Lock(),
+        running_logs=running_logs,
+    )
+    task = Task(
+        id=new_task_id(),
+        owner_chat_id=10,
+        scope="user",
+        kind="llm",
+        prompt="x",
+        schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+    await runner.run(task)
+
+    assert mid.get(task.id) == "/live/run.jsonl"  # published while running
+    assert running_logs == {}  # cleared once finished

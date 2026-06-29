@@ -156,6 +156,23 @@ async def test_show_returns_last_run_log_path(tmp_path: Path) -> None:
     assert out["last_run"]["log_path"].endswith(f"{task_id}/run.jsonl")
 
 
+async def test_show_running_returns_live_log_path(tmp_path: Path) -> None:
+    """Show on a running task returns the live provider log path."""
+    running_logs: dict[str, str] = {}
+    svc = TaskService(TaskStore(tmp_path), _cfg(), running_logs=running_logs)
+    handle = make_task_handler(USER, svc)
+
+    task_id = _payload(
+        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
+    )["task"]["id"]
+    running_logs[task_id] = "/root/.claude/projects/-vault/sess-9.jsonl"
+
+    out = _payload(await handle({"action": "show", "task_id": task_id}))
+    assert out["success"] is True
+    assert out["running"] is True
+    assert out["log_path"] == "/root/.claude/projects/-vault/sess-9.jsonl"
+
+
 async def test_show_without_runs_omits_last_run(tmp_path: Path) -> None:
     """Show on a never-run task omits the last_run block."""
     handle = _handler(tmp_path)

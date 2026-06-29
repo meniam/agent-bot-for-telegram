@@ -237,13 +237,19 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     if cfg.uploads_dir:
         add_dirs.append(cfg.uploads_dir)
 
+    # Live task-run state shared across the scheduler, runner, service, and
+    # context: ids running right now (for `/tasks`) and their live provider
+    # transcript paths (for `show` mid-run). Mutated in place by their owners.
+    running_task_ids: set[str] = set()
+    running_logs: dict[str, str] = {}
+
     # Build the task store + service before the agent so the Claude backend can
     # expose a per-chat `task` tool that reuses the same permission/scan rules.
     tasks: TaskStore | None = None
     task_service: TaskService | None = None
     if cfg.tasks_enabled and cfg.tasks_dir:
         tasks = TaskStore(Path(cfg.tasks_dir), history_limit=cfg.tasks_history_limit)
-        task_service = TaskService(tasks, cfg)
+        task_service = TaskService(tasks, cfg, running_logs=running_logs)
         glog.info("[%s] tasks: %s", cfg.name, cfg.tasks_dir)
     elif cfg.tasks_enabled:
         glog.warning(
@@ -307,10 +313,6 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         tr, commands, tasks_enabled=cfg.tasks_enabled
     )
 
-    # Shared with the scheduler: ids of tasks running right now, so `/tasks`
-    # can render a live "running" state (the scheduler mutates this set).
-    running_task_ids: set[str] = set()
-
     ctx = BotContext(
         cfg=cfg,
         bot=bot,
@@ -332,6 +334,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         tasks=tasks,
         task_service=task_service,
         running_task_ids=running_task_ids,
+        running_logs=running_logs,
     )
 
     dp = Dispatcher()
@@ -350,6 +353,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             agent=agent,
             log_for_chat=bot_logs.for_chat,
             workdir_lock=workdir_lock,
+            running_logs=running_logs,
         )
         async def _alert_loop_death(exc: BaseException) -> None:
             """Push a scheduler-death alert to every admin chat (best-effort)."""

@@ -942,6 +942,41 @@ async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
     assert type(deny).__name__ == "PermissionResultDeny"
 
 
+async def test_ask_ephemeral_sandbox_bypasses_and_enables_skills(
+    monkeypatch: Any,
+) -> None:
+    """In a sandbox the run bypasses permissions and turns on skills + MCP."""
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    import src.infra.claude_agent as claude_module
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_query(*, prompt: str, options: Any) -> Any:
+        """Capture the options and yield a canned assistant message."""
+        captured["options"] = options
+        _ = prompt
+        yield AssistantMessage(content=[TextBlock(text="ok")], model="m")
+
+    monkeypatch.setattr(claude_module, "query", _fake_query)
+
+    backend = ClaudeAgentBackend(
+        _store(),
+        system_prompt="x",
+        cwd="/vault",
+        dangerously_skip_permissions=True,
+    )
+    out = await backend.ask_ephemeral(7, "hi", allowed_tools=("Read",))
+
+    assert out.text == "ok"
+    opts = captured["options"]
+    # No allowlist gate (bypass makes it dead weight) and full skill access.
+    assert opts.can_use_tool is None
+    assert opts.permission_mode == "bypassPermissions"
+    assert opts.skills == "all"
+    assert opts.allowed_tools == []
+
+
 async def test_ask_ephemeral_ignores_tool_blocks_returns_text(monkeypatch: Any) -> None:
     """Verify ask_ephemeral extracts text past interleaved tool-use/result blocks."""
     from claude_agent_sdk import (

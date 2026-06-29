@@ -66,3 +66,7 @@ class BotContext:
     # Ids of scheduled tasks running right now, kept in sync by the scheduler so
     # `/tasks` can show a live "running" state. Mutated in place (frozen-safe).
     running_task_ids: set[str] = field(default_factory=set)
+    # Live provider transcript path per running task id, set by the runner once
+    # the session starts; lets `show` hand back a tail-able log mid-run. Replaced
+    # by the copied path in the history record once the run finishes.
+    running_logs: dict[str, str] = field(default_factory=dict)

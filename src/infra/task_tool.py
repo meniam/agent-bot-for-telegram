@@ -116,10 +116,16 @@ def make_task_handler(
                     return _err("task_id is required for show")
                 task = await service.act(chat_id, "show", task_id)
                 last = await service.last_run(chat_id, task_id)
+                live_log = service.live_log_path(task_id)
                 payload: dict[str, Any] = {
                     "task": _fmt_task(task),
                     "message": f"Task {task.id}: show ok.",
                 }
+                if live_log is not None:
+                    # Running now: hand back the live provider transcript so it
+                    # can be tailed; the copied path lands in history on finish.
+                    payload["running"] = True
+                    payload["log_path"] = live_log
                 if last is not None:
                     payload["last_run"] = {
                         "status": last.status,

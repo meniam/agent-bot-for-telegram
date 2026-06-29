@@ -63,10 +63,25 @@ def scan_prompt(text: str) -> str | None:
 class TaskService:
     """Permission-checked CRUD over `TaskStore`, shared by handler and tool."""
 
-    def __init__(self, store: TaskStore, cfg: BotConfig) -> None:
-        """Bind the service to a `TaskStore` and the owning bot config."""
+    def __init__(
+        self,
+        store: TaskStore,
+        cfg: BotConfig,
+        running_logs: dict[str, str] | None = None,
+    ) -> None:
+        """Bind the service to a `TaskStore`, the bot config, and live-run state.
+
+        ``running_logs`` (optional) maps an in-flight task id to its live
+        provider transcript path; ``live_log_path`` reads it so callers can show
+        a tail-able log while a task is still running.
+        """
         self._store = store
         self._cfg = cfg
+        self._running_logs = running_logs if running_logs is not None else {}
+
+    def live_log_path(self, task_id: str) -> str | None:
+        """Return the live transcript path if the task is running now, else None."""
+        return self._running_logs.get(task_id)
 
     def _now(self) -> datetime:
         """Return the current time as a timezone-aware datetime."""

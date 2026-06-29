@@ -70,8 +70,14 @@ class TaskRunner:
         log_for_chat: Callable[[int], logging.Logger],
         workdir_lock: asyncio.Lock,
         now_fn: Callable[[], datetime] | None = None,
+        running_logs: dict[str, str] | None = None,
     ) -> None:
-        """Wire the runner to its delivery callback, config, store, and agent."""
+        """Wire the runner to its delivery callback, config, store, and agent.
+
+        ``running_logs`` (optional) is a shared map of in-flight task id to the
+        live provider transcript path; the runner fills it when an LLM run's
+        session starts and clears it when the run ends.
+        """
         self._deliver_md = deliver
         self._cfg = cfg
         self._store = store
@@ -79,6 +85,7 @@ class TaskRunner:
         self._log_for_chat = log_for_chat
         self._workdir_lock = workdir_lock
         self._now = now_fn or (lambda: datetime.now().astimezone())
+        self._running_logs = running_logs if running_logs is not None else {}
 
     async def run(self, task: Task) -> RunOutcome:
         """Execute a task, deliver its output, and persist a history record.
@@ -87,17 +94,22 @@ class TaskRunner:
         of a successful run is delivered to the task's targets; the run is then
         recorded to history regardless of outcome.
         """
-        if task.needs_lock:
-            async with self._workdir_lock:
+        try:
+            if task.needs_lock:
+                async with self._workdir_lock:
+                    outcome = await self._execute(task)
+            else:
                 outcome = await self._execute(task)
-        else:
-            outcome = await self._execute(task)
 
-        if outcome.status == "ok" and outcome.output.strip():
-            outcome.delivered_to = await self._deliver(task, outcome.output)
+            if outcome.status == "ok" and outcome.output.strip():
+                outcome.delivered_to = await self._deliver(task, outcome.output)
 
-        await self._record(task, outcome)
-        return outcome
+            await self._record(task, outcome)
+            return outcome
+        finally:
+            # The live log path only applies while the task is running; the
+            # finished record carries the copied path instead.
+            self._running_logs.pop(task.id, None)
 
     async def _execute(self, task: Task) -> RunOutcome:
         """Run the task's script or LLM turn, catching failures into an outcome."""
@@ -237,8 +249,16 @@ class TaskRunner:
             if self._cfg.tasks_allowed_tools is not None
             else DEFAULT_ALLOWED_TOOLS
         )
+
+        def _on_session_path(path: str) -> None:
+            """Publish the live provider transcript path while the run is active."""
+            self._running_logs[task.id] = path
+
         return await self._agent.ask_ephemeral(
-            task.owner_chat_id, task.prompt, allowed_tools=allowed
+            task.owner_chat_id,
+            task.prompt,
+            allowed_tools=allowed,
+            on_session_path=_on_session_path,
         )
 
     # ----- delivery + history ----------------------------------------------

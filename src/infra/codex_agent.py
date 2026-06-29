@@ -746,10 +746,15 @@ class CodexAgentBackend(BaseAgentBackend):
         return title or None
 
     async def ask_ephemeral(
-        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        allowed_tools: tuple[str, ...],
+        on_session_path: "Callable[[str], None] | None" = None,
     ) -> EphemeralResult:
         """Raise ``NotImplementedError``; Codex has no stateless-turn primitive."""
-        _ = (chat_id, prompt, allowed_tools)
+        _ = (chat_id, prompt, allowed_tools, on_session_path)
         raise NotImplementedError("Codex backend has no ephemeral-session turn")
 
     async def reset(self, chat_id: int) -> None:

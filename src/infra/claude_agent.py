@@ -20,6 +20,7 @@ from claude_agent_sdk import (
     ProcessError,
     ResultMessage,
     StreamEvent,
+    SystemMessage,
     TextBlock,
     ToolPermissionContext,
     query,
@@ -560,31 +561,71 @@ class ClaudeAgentBackend(BaseAgentBackend):
         return None
 
     async def ask_ephemeral(
-        self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        allowed_tools: tuple[str, ...],
+        on_session_path: Callable[[str], None] | None = None,
     ) -> EphemeralResult:
         """Run a one-shot agent turn in a throwaway session for a scheduled task.
 
         Uses the SDK's stateless ``query()`` so the chat's live session and the
-        ``current`` pointer are never touched. Permissions are non-interactive:
-        only tools in ``allowed_tools`` are allowed; everything else is denied
-        silently (no Telegram gate — nobody is watching a background run).
+        ``current`` pointer are never touched. The run sees the same world the
+        live chat does — ``cwd`` (the vault), skills, and the per-chat MCP
+        servers (scheduling + isolated Graphiti memory).
+
+        Permission posture follows the same config knob the interactive session
+        uses (``agent_dangerously_skip_permissions``): when it is on the run uses
+        ``bypassPermissions`` so it may call any tool/skill/MCP without a prompt —
+        nobody is watching a background run. When it is off a hard allowlist
+        applies: only ``tasks.allowed_tools`` run, everything else is denied
+        silently.
 
         Captures the run's ``session_id`` from the message stream so the task
-        runner can copy the SDK jsonl transcript next to the run history.
+        runner can copy the SDK jsonl transcript next to the run history. When
+        the id first appears (the ``init`` system message), ``on_session_path``
+        is invoked with the live provider transcript path.
         """
         allow = set(allowed_tools)
+        skip_perms = self._dangerously_skip_permissions
 
-        async def _can_use_tool(
-            tool_name: str,
-            _tool_input: dict[str, Any],
-            _ctx: ToolPermissionContext,
-        ) -> PermissionResultAllow | PermissionResultDeny:
-            """Allow only tools in the task's allowlist; deny everything else silently."""
-            if tool_name in allow:
-                return PermissionResultAllow()
-            return PermissionResultDeny(
-                message=f"tool {tool_name} is not in tasks.allowed_tools"
-            )
+        # The SDK skips `can_use_tool` under bypassPermissions, so the allowlist
+        # gate is only wired (and only needed) when permissions are enforced.
+        can_use_tool: (
+            Callable[
+                [str, dict[str, Any], ToolPermissionContext],
+                Awaitable[PermissionResultAllow | PermissionResultDeny],
+            ]
+            | None
+        ) = None
+        if not skip_perms:
+
+            async def _can_use_tool(
+                tool_name: str,
+                _tool_input: dict[str, Any],
+                _ctx: ToolPermissionContext,
+            ) -> PermissionResultAllow | PermissionResultDeny:
+                """Allow only tools in the task's allowlist; deny everything else silently."""
+                if tool_name in allow:
+                    return PermissionResultAllow()
+                return PermissionResultDeny(
+                    message=f"tool {tool_name} is not in tasks.allowed_tools"
+                )
+
+            can_use_tool = _can_use_tool
+
+        # Same per-chat MCP servers the interactive session exposes, so a task
+        # can reach its isolated memory and manage its own schedule.
+        mcp_servers: dict[str, McpSdkServerConfig] = {}
+        if self._task_server_factory is not None:
+            server = self._task_server_factory(chat_id)
+            if server is not None:
+                mcp_servers["tasks"] = server
+        if self._graphiti_server_factory is not None:
+            gserver = self._graphiti_server_factory(chat_id)
+            if gserver is not None:
+                mcp_servers["graphiti-memory"] = gserver
 
         options = ClaudeAgentOptions(
             system_prompt=self._system_prompt,
@@ -592,10 +633,18 @@ class ClaudeAgentBackend(BaseAgentBackend):
             cwd=self._cwd,
             add_dirs=list(self._add_dirs),
             setting_sources=["user", "project", "local"],
-            allowed_tools=list(allowed_tools),
-            can_use_tool=_can_use_tool,
+            skills="all",
+            permission_mode="bypassPermissions" if skip_perms else "default",
+            allowed_tools=[] if skip_perms else list(allowed_tools),
+            can_use_tool=can_use_tool,
+            mcp_servers=cast(Any, mcp_servers),
         )
-        log.debug("ask_ephemeral chat_id=%s tools=%s", chat_id, sorted(allow))
+        log.debug(
+            "ask_ephemeral chat_id=%s skip_perms=%s tools=%s",
+            chat_id,
+            skip_perms,
+            "all" if skip_perms else sorted(allow),
+        )
 
         # A `can_use_tool` callback forces streaming mode: the prompt must be an
         # AsyncIterable of message dicts, not a plain string.
@@ -615,6 +664,17 @@ class ClaudeAgentBackend(BaseAgentBackend):
                         parts.append(block.text)
             elif isinstance(msg, ResultMessage):
                 session_id = msg.session_id
+            elif isinstance(msg, SystemMessage) and session_id is None:
+                # The `init` system message carries the session id before any
+                # output, so the live transcript path can be surfaced mid-run.
+                data = msg.data if isinstance(msg.data, dict) else {}
+                sid = data.get("session_id")
+                if isinstance(sid, str) and sid:
+                    session_id = sid
+                    if on_session_path is not None:
+                        path = self._transcript_path(sid)
+                        if path is not None:
+                            on_session_path(path)
         return EphemeralResult(
             text="".join(parts).strip(),
             session_id=session_id,
