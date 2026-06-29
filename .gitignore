@@ -14,6 +14,7 @@ commands/
 var/
 docs/plans/
 AUDIT.md
+DEPLOY.md
 promo.txt
 /bot.log
 restart.dev.sh
