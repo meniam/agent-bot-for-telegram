@@ -9,6 +9,7 @@ they are exposed without leaking Codex wire shapes into Telegram handlers.
 import asyncio
 import contextlib
 import importlib
+import json
 import logging
 import shutil
 import time
@@ -39,6 +40,43 @@ CODEX_MODELS: tuple[tuple[str, str], ...] = (
     ("", ""),
 )
 CODEX_RUN_TIMEOUT_SEC = 120.0
+
+
+def _normalize_mcp_server(raw: Any) -> dict[str, Any]:
+    """Convert one ``codex mcp list --json`` server into UI status shape."""
+    if not isinstance(raw, dict):
+        return {"name": "?", "status": "failed", "error": "invalid server payload"}
+    transport = raw.get("transport")
+    transport_type = None
+    if isinstance(transport, dict):
+        transport_type = transport.get("type")
+    enabled = bool(raw.get("enabled", True))
+    disabled_reason = raw.get("disabled_reason")
+    status = "connected" if enabled else "disabled"
+    error = None
+    if disabled_reason:
+        status = "disabled"
+        error = str(disabled_reason)
+    if transport_type == "stdio" and isinstance(transport, dict):
+        command = transport.get("command")
+        if isinstance(command, str) and shutil.which(command) is None:
+            status = "failed"
+            error = f"command not found: {command}"
+    if transport_type == "streamable_http":
+        scope = transport.get("url") if isinstance(transport, dict) else None
+    elif transport_type == "stdio":
+        scope = transport.get("command") if isinstance(transport, dict) else None
+    else:
+        scope = transport_type
+    out: dict[str, Any] = {
+        "name": str(raw.get("name") or "?"),
+        "status": status,
+    }
+    if scope:
+        out["scope"] = str(scope)
+    if error:
+        out["error"] = error
+    return out
 
 
 @dataclass(slots=True)
@@ -697,7 +735,7 @@ class CodexAgentBackend(BaseAgentBackend):
         return False
 
     async def get_mcp_status(self, chat_id: int) -> dict[str, Any]:
-        """Return MCP status from the thread if exposed, else an empty list."""
+        """Return MCP status from the thread or Codex CLI config fallback."""
         thread = await self._get_thread(chat_id)
         for method_name in ("get_mcp_status", "mcp_status"):
             method = getattr(thread, method_name, None)
@@ -707,7 +745,44 @@ class CodexAgentBackend(BaseAgentBackend):
             if hasattr(result, "__await__"):
                 result = await result
             return dict(result)
-        return {"mcpServers": []}
+        return await self._mcp_status_from_cli()
+
+    async def _mcp_status_from_cli(self) -> dict[str, Any]:
+        """Read configured MCP servers via ``codex mcp list --json``."""
+        codex_bin = await asyncio.to_thread(self._resolve_codex_bin)
+        if codex_bin is None:
+            return {"mcpServers": []}
+        proc = await asyncio.create_subprocess_exec(
+            codex_bin,
+            "mcp",
+            "list",
+            "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self._cwd,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            log.warning("Codex MCP status fallback timed out")
+            return {"mcpServers": []}
+        if proc.returncode != 0:
+            log.warning(
+                "Codex MCP status fallback failed rc=%s stderr=%s",
+                proc.returncode,
+                stderr.decode("utf-8", errors="replace")[:500],
+            )
+            return {"mcpServers": []}
+        try:
+            raw = json.loads(stdout.decode("utf-8"))
+        except json.JSONDecodeError:
+            log.warning("Codex MCP status fallback returned invalid JSON")
+            return {"mcpServers": []}
+        if not isinstance(raw, list):
+            return {"mcpServers": []}
+        return {"mcpServers": [_normalize_mcp_server(item) for item in raw]}
 
     async def get_server_info(self, chat_id: int) -> dict[str, Any] | None:
         """Return server info from the thread if exposed, else a minimal fallback."""

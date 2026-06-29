@@ -12,7 +12,7 @@ from src.config import BotConfig
 from src.infra.agent_factory import create_agent_backend
 from src.infra.agent_types import AgentEventStreamTimeout, StreamChunk
 from src.infra.claude_agent import ClaudeAgentBackend
-from src.infra.codex_agent import CodexAgentBackend
+from src.infra.codex_agent import CodexAgentBackend, _normalize_mcp_server
 from src.infra.pi_agent import PiAgentBackend
 from src.infra.session_store import SessionStore
 
@@ -703,6 +703,73 @@ async def test_codex_backend_times_out_silent_run() -> None:
     assert [(phase, tool) for _, phase, tool, _ in events] == [
         ("pre", "Codex"),
         ("post", "Codex"),
+    ]
+
+
+def test_codex_mcp_status_normalizes_cli_servers() -> None:
+    """Verify Codex CLI MCP JSON is converted to the shared status shape."""
+    http_server = _normalize_mcp_server(
+        {
+            "name": "graphiti-memory",
+            "enabled": True,
+            "transport": {
+                "type": "streamable_http",
+                "url": "http://graphiti:8000/mcp",
+            },
+        }
+    )
+    broken_stdio = _normalize_mcp_server(
+        {
+            "name": "node_repl",
+            "enabled": True,
+            "transport": {
+                "type": "stdio",
+                "command": "/definitely/missing/node_repl",
+            },
+        }
+    )
+
+    assert http_server == {
+        "name": "graphiti-memory",
+        "status": "connected",
+        "scope": "http://graphiti:8000/mcp",
+    }
+    assert broken_stdio["name"] == "node_repl"
+    assert broken_stdio["status"] == "failed"
+    assert "command not found" in broken_stdio["error"]
+
+
+@pytest.mark.asyncio
+async def test_codex_mcp_status_falls_back_to_cli_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `/mcp` can report Codex servers when the thread has no status API."""
+    script = tmp_path / "codex"
+    script.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' '[{\"name\":\"graphiti-memory\",\"enabled\":true,"
+        "\"transport\":{\"type\":\"streamable_http\","
+        "\"url\":\"http://graphiti:8000/mcp\"}}]'\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    backend = CodexAgentBackend(
+        session_store=_store(),
+        system_prompt="system",
+        cwd=str(tmp_path),
+        codex_factory=lambda: _FakeCodex(),
+    )
+    monkeypatch.setattr(backend, "_resolve_codex_bin", lambda: str(script))
+
+    status = await backend.get_mcp_status(10)
+
+    assert status["mcpServers"] == [
+        {
+            "name": "graphiti-memory",
+            "status": "connected",
+            "scope": "http://graphiti:8000/mcp",
+        }
     ]
 
 
