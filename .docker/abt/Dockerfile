@@ -14,9 +14,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_RETRIES=5 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# Node 22 LTS + the few tools the agents shell out to (git for repo ops).
+# Node 22 LTS + the few tools the agents shell out to (git for repo ops,
+# openssh-client so the bot/agent can ssh into other hosts via mounted keys).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates gnupg git \
+ && apt-get install -y --no-install-recommends curl ca-certificates gnupg git openssh-client \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
