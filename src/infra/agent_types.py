@@ -98,6 +98,10 @@ class AgentBackend(Protocol):
         """Interrupt the chat's running turn (lock-free). False if none is active."""
         ...
 
+    def is_busy(self, chat_id: int) -> bool:
+        """Whether a turn currently holds the chat's lock (another is in flight)."""
+        ...
+
     async def get_mcp_status(self, chat_id: int) -> dict[str, Any]:
         """MCP server status for ``/mcp`` (``{"mcpServers": [...]}``)."""
         ...

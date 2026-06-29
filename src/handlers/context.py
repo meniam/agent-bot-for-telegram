@@ -7,7 +7,7 @@ logs and so on, instead of capturing a closure-tangle of references each.
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from aiogram import Bot
 from aiogram.types import BotCommand
@@ -60,3 +60,6 @@ class BotContext:
     tasks: TaskStore | None = None
     # Permission-checked task CRUD over `tasks`; None when disabled.
     task_service: TaskService | None = None
+    # Chats already told "busy" while a turn runs; deduped so queued messages
+    # get one notice, not one per message. Mutated in place (frozen-safe).
+    busy_notified: set[int] = field(default_factory=set)

@@ -105,6 +105,11 @@ async def reply_with_agent(
                 ", ".join(str(p.path) for p in pending),
             )
             prompt = format_attachment_prompt(pending, prompt)
+    # Another turn already holds this chat's lock: tell the user once that the
+    # message is queued (the lock is FIFO, so it runs next), not dropped.
+    if ctx.agent.is_busy(message.chat.id) and message.chat.id not in ctx.busy_notified:
+        ctx.busy_notified.add(message.chat.id)
+        await send_md(message, ctx.tr.t("agent_busy"))
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     ctx.tool_mirror.begin_turn(message.chat.id)
     # Always clear the live tool-status line once the turn ends — every exit
@@ -177,3 +182,6 @@ async def reply_with_agent(
         await send_md(message, final)
     finally:
         await ctx.tool_mirror.end_turn(message.chat.id)
+        # Turn done — clear the busy flag so a message arriving during the next
+        # turn gets its own notice.
+        ctx.busy_notified.discard(message.chat.id)

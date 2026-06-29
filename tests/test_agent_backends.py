@@ -175,6 +175,25 @@ async def test_claude_backend_times_out_silent_event_stream(
     assert created[0].interrupted is True
 
 
+async def test_is_busy_tracks_per_chat_lock() -> None:
+    """is_busy reflects whether the chat's lock is held by an in-flight turn."""
+    backend = ClaudeAgentBackend(_store(), system_prompt="x", idle_ttl_sec=0)
+
+    # No lock yet for an untouched chat.
+    assert backend.is_busy(7) is False
+
+    lock = backend._lock(7)
+    await lock.acquire()
+    try:
+        assert backend.is_busy(7) is True
+        # A different chat is unaffected.
+        assert backend.is_busy(8) is False
+    finally:
+        lock.release()
+
+    assert backend.is_busy(7) is False
+
+
 class _FakeResult:
     """Stub Codex run result carrying canned event records."""
 

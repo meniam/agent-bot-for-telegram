@@ -38,6 +38,11 @@ class BaseAgentBackend:
         """Return the per-chat lock, creating it on first use."""
         return self._locks.setdefault(chat_id, asyncio.Lock())
 
+    def is_busy(self, chat_id: int) -> bool:
+        """Whether a turn currently holds the chat's lock (another is in flight)."""
+        lock = self._locks.get(chat_id)
+        return lock is not None and lock.locked()
+
     def _ensure_gc_running(self) -> None:
         """Start the idle-GC loop if a TTL is set and it is not already running."""
         if self._idle_ttl <= 0:

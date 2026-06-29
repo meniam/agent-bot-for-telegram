@@ -22,6 +22,7 @@
   "error_internal": "Internal error: {error}. See logs for details.",
   "agent_timeout": "⌛ Agent did not respond in {seconds}s. Try /new and retry.",
   "agent_stalled": "⌛ The agent stopped reporting progress for this task. I stopped the stuck turn. Send the task again or use /new for a clean session.",
+  "agent_busy": "⏳ Busy with your previous request — I'll reply as soon as it's done.",
   "unauthorized_callback": "This button is for a different chat.",
   "bot_command_start": "Start",
   "bot_command_new": "Fresh agent session",
