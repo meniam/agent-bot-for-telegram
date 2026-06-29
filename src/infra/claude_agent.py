@@ -23,6 +23,9 @@ from claude_agent_sdk import (
     SystemMessage,
     TextBlock,
     ToolPermissionContext,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
     query,
 )
 
@@ -37,6 +40,31 @@ from .session_store import Session, SessionStore
 from .task_tool import TASK_TOOL_NAME
 
 log = logging.getLogger(__name__)
+# Dedicated logger for scheduled-task (ephemeral) runs. The bot attaches a file
+# handler here so every background turn — its tool calls, the agent's own text,
+# tool errors, and the final result/denials — is written to <tasks_dir>/tasks.log.
+eph_log = logging.getLogger(__name__ + ".ephemeral")
+
+
+def _short_json(value: Any, limit: int = 300) -> str:
+    """Compactly render a tool input for the task log, truncated to ``limit``."""
+    import json
+
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(value)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _short_text(value: Any, limit: int = 300) -> str:
+    """Render a tool-result payload (str or block list) to a short string."""
+    if isinstance(value, list):
+        value = " ".join(
+            b.get("text", "") for b in value if isinstance(b, dict)
+        )
+    text = str(value)
+    return text if len(text) <= limit else text[:limit] + "…"
 
 _TITLE_MAX_LEN = 60
 # The title text must follow the bot's configured language; `{lang}` is the
@@ -639,10 +667,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
             can_use_tool=can_use_tool,
             mcp_servers=cast(Any, mcp_servers),
         )
-        log.debug(
-            "ask_ephemeral chat_id=%s skip_perms=%s tools=%s",
+        log.info(
+            "ask_ephemeral chat_id=%s skip_perms=%s mcp=%s tools=%s",
             chat_id,
             skip_perms,
+            sorted(mcp_servers),
             "all" if skip_perms else sorted(allow),
         )
 
@@ -657,13 +686,49 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         parts: list[str] = []
         session_id: str | None = None
+        eph_log.info("run begin chat_id=%s prompt=%r", chat_id, prompt[:160])
         async for msg in query(prompt=_prompt_stream(), options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         parts.append(block.text)
+                        # The agent's own words — in a background run this is
+                        # often it "asking" the (absent) user or narrating.
+                        text = block.text.strip()
+                        if text:
+                            eph_log.info("agent: %s", text[:500])
+                    elif isinstance(block, ToolUseBlock):
+                        eph_log.info(
+                            "tool-use %s %s",
+                            block.name,
+                            _short_json(block.input),
+                        )
+            elif isinstance(msg, UserMessage):
+                # Tool results stream back as a user message; surface failures.
+                content = msg.content
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, ToolResultBlock) and block.is_error:
+                            eph_log.warning(
+                                "tool-error: %s", _short_text(block.content)
+                            )
             elif isinstance(msg, ResultMessage):
                 session_id = msg.session_id
+                level = logging.ERROR if msg.is_error else logging.INFO
+                eph_log.log(
+                    level,
+                    "run end subtype=%s is_error=%s turns=%s stop=%s "
+                    "api_error_status=%s denials=%s errors=%s",
+                    msg.subtype,
+                    msg.is_error,
+                    msg.num_turns,
+                    msg.stop_reason,
+                    msg.api_error_status,
+                    len(msg.permission_denials or []),
+                    msg.errors,
+                )
+                if msg.permission_denials:
+                    eph_log.warning("permission denials: %s", msg.permission_denials)
             elif isinstance(msg, SystemMessage) and session_id is None:
                 # The `init` system message carries the session id before any
                 # output, so the live transcript path can be surfaced mid-run.
@@ -671,6 +736,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 sid = data.get("session_id")
                 if isinstance(sid, str) and sid:
                     session_id = sid
+                    eph_log.info("session started id=%s", sid)
                     if on_session_path is not None:
                         path = self._transcript_path(sid)
                         if path is not None:

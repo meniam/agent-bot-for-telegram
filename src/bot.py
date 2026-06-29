@@ -17,6 +17,7 @@ import contextlib
 import logging
 import os
 from functools import partial
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import aiohttp
@@ -130,6 +131,38 @@ def _make_logs(cfg: BotConfig) -> tuple[BotLogs, logging.Logger, Path | None]:
         messages_dir=messages_dir,
     )
     return bot_logs, bot_logs.general, bot_log_dir
+
+
+def _attach_task_log(tasks_dir: Path) -> None:
+    """Tee the full task lifecycle into ``<tasks_dir>/tasks.log`` (idempotent).
+
+    The scheduler, runner, and ephemeral-run loggers get a rotating file handler
+    so every fire, lock wait, tool call, the agent's own messages, and errors sit
+    right next to the task ``.json`` — tail it to see exactly what a background
+    run did and where it stalled.
+    """
+    base = TaskRunner.__module__.rsplit(".", 1)[0]  # e.g. "src.infra"
+    names = (
+        f"{base}.task_scheduler",
+        f"{base}.task_runner",
+        f"{base}.claude_agent.ephemeral",
+    )
+    handler = RotatingFileHandler(
+        tasks_dir / "tasks.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    for name in names:
+        lg = logging.getLogger(name)
+        # Don't stack a second handler for the same file when re-entered.
+        if any(
+            getattr(h, "baseFilename", None) == handler.baseFilename
+            for h in lg.handlers
+        ):
+            continue
+        lg.setLevel(logging.INFO)
+        lg.addHandler(handler)
 
 
 def _make_transcriber(
@@ -250,7 +283,13 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     if cfg.tasks_enabled and cfg.tasks_dir:
         tasks = TaskStore(Path(cfg.tasks_dir), history_limit=cfg.tasks_history_limit)
         task_service = TaskService(tasks, cfg, running_logs=running_logs)
-        glog.info("[%s] tasks: %s", cfg.name, cfg.tasks_dir)
+        _attach_task_log(Path(cfg.tasks_dir))
+        glog.info(
+            "[%s] tasks: %s (log: %s)",
+            cfg.name,
+            cfg.tasks_dir,
+            Path(cfg.tasks_dir) / "tasks.log",
+        )
     elif cfg.tasks_enabled:
         glog.warning(
             "[%s] tasks_enabled but tasks_dir is unset — tasks disabled", cfg.name

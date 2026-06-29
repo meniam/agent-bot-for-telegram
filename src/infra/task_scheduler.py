@@ -32,6 +32,10 @@ from .task_types import (
     compute_next_run,
 )
 
+# Module logger; the bot wires a file handler here (and on the runner + the
+# ephemeral agent) so the full task lifecycle lands in <tasks_dir>/tasks.log.
+log = logging.getLogger(__name__)
+
 
 class TaskScheduler:
     """Background loop that fires due tasks via `TaskRunner`.
@@ -200,7 +204,7 @@ class TaskScheduler:
                         }
                     )
                 )
-                self._glog.info(
+                log.info(
                     "[%s] task %s missed one-shot window — completed without run",
                     self._cfg.name,
                     task.id,
@@ -209,13 +213,14 @@ class TaskScheduler:
             if decision == "skip":
                 nxt = compute_next_run(task.schedule, last_run=now, now=now)
                 await self._store.update(task.model_copy(update={"next_run_at": nxt}))
-                self._glog.info(
+                log.info(
                     "[%s] task %s missed its window — fast-forwarded to %s",
                     self._cfg.name,
                     task.id,
                     nxt,
                 )
                 continue
+            log.info("[%s] task %s due — dispatching", self._cfg.name, task.id)
             self._running.add(task.id)
             job = asyncio.create_task(self._run_tracked(task, now))
             self._inflight.add(job)
@@ -266,12 +271,27 @@ class TaskScheduler:
             # Advance scheduling BEFORE running so a slow run can't double-fire.
             pre = self._advance_before_run(task, now)
             await self._store.update(pre)
+            log.info(
+                "[%s] task %s fired kind=%s next_run_at->%s",
+                self._cfg.name,
+                task.id,
+                task.kind,
+                pre.next_run_at,
+            )
 
             outcome = await self._runner.run(pre)
 
             final = self._finalize_after_run(pre, outcome.status, outcome.error, now)
             await self._store.update(final)
+            log.info(
+                "[%s] task %s settled state=%s last_status=%s",
+                self._cfg.name,
+                task.id,
+                final.state,
+                final.last_status,
+            )
         except Exception:
+            log.exception("[%s] task %s crashed", self._cfg.name, task.id)
             self._glog.exception("[%s] task %s crashed", self._cfg.name, task.id)
         finally:
             self._running.discard(task.id)

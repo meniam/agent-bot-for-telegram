@@ -94,9 +94,19 @@ class TaskRunner:
         of a successful run is delivered to the task's targets; the run is then
         recorded to history regardless of outcome.
         """
+        log.info(
+            "task %s (%s): run start kind=%s needs_lock=%s prompt=%r",
+            task.id,
+            task.name or "",
+            task.kind,
+            task.needs_lock,
+            (task.prompt or "")[:120],
+        )
         try:
             if task.needs_lock:
+                log.info("task %s: acquiring workdir lock", task.id)
                 async with self._workdir_lock:
+                    log.info("task %s: workdir lock acquired", task.id)
                     outcome = await self._execute(task)
             else:
                 outcome = await self._execute(task)
@@ -105,6 +115,19 @@ class TaskRunner:
                 outcome.delivered_to = await self._deliver(task, outcome.output)
 
             await self._record(task, outcome)
+            log.info(
+                "task %s: run done status=%s duration=%dms session=%s "
+                "delivered=%s err=%s",
+                task.id,
+                outcome.status,
+                int(
+                    (outcome.finished_at - outcome.started_at).total_seconds()
+                    * 1000
+                ),
+                outcome.session_id,
+                outcome.delivered_to,
+                outcome.error,
+            )
             return outcome
         finally:
             # The live log path only applies while the task is running; the
@@ -128,7 +151,14 @@ class TaskRunner:
                     started_at=started,
                     finished_at=self._now(),
                 )
+            log.info("task %s: starting llm turn", task.id)
             result = await self._run_llm(task)
+            log.info(
+                "task %s: llm turn returned session=%s chars=%d",
+                task.id,
+                result.session_id,
+                len(result.text),
+            )
             return RunOutcome(
                 status="ok",
                 output=result.text,
@@ -141,6 +171,7 @@ class TaskRunner:
             )
         except Exception as e:  # isolate one task; never crash the loop
             cl.exception("task %s failed: %s", task.id, e)
+            log.error("task %s failed: %s", task.id, e, exc_info=True)
             return RunOutcome(
                 status="error",
                 output="",
