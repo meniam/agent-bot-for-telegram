@@ -18,7 +18,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from ..config import BotConfig
 from .agent import AgentBackend
@@ -53,10 +52,9 @@ class RunOutcome:
     started_at: datetime
     finished_at: datetime
     delivered_to: list[int] = field(default_factory=list)
-    # LLM runs only: transcript pointer + the tools/skills the model invoked.
+    # LLM runs only: SDK session id + path to its jsonl transcript.
     session_id: str | None = None
     transcript_path: str | None = None
-    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class TaskRunner:
@@ -128,7 +126,6 @@ class TaskRunner:
                 finished_at=self._now(),
                 session_id=result.session_id,
                 transcript_path=result.transcript_path,
-                tool_events=result.tool_events,
             )
         except Exception as e:  # isolate one task; never crash the loop
             cl.exception("task %s failed: %s", task.id, e)
@@ -290,13 +287,9 @@ class TaskRunner:
             transcript_path=outcome.transcript_path,
         )
         await self._store.append_history(run)
-        # For LLM runs, drop a tool/skill activity log next to the run record so
-        # it can be inspected alongside the task history.
-        if outcome.session_id is not None or outcome.tool_events:
-            await self._store.append_tool_log(
-                task.id,
-                outcome.started_at,
-                session_id=outcome.session_id,
-                transcript_path=outcome.transcript_path,
-                events=outcome.tool_events,
+        # For LLM runs, copy the SDK jsonl transcript next to the run record so
+        # the full session (tools, inputs, outputs) is inspectable alongside it.
+        if outcome.transcript_path:
+            await self._store.copy_transcript(
+                task.id, outcome.started_at, Path(outcome.transcript_path)
             )

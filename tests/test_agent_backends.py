@@ -942,8 +942,8 @@ async def test_ask_ephemeral_leaves_session_untouched(monkeypatch: Any) -> None:
     assert type(deny).__name__ == "PermissionResultDeny"
 
 
-async def test_ask_ephemeral_captures_tools_and_text(monkeypatch: Any) -> None:
-    """Verify ask_ephemeral records tool calls (with error flag) from the stream."""
+async def test_ask_ephemeral_ignores_tool_blocks_returns_text(monkeypatch: Any) -> None:
+    """Verify ask_ephemeral extracts text past interleaved tool-use/result blocks."""
     from claude_agent_sdk import (
         AssistantMessage,
         TextBlock,
@@ -955,7 +955,7 @@ async def test_ask_ephemeral_captures_tools_and_text(monkeypatch: Any) -> None:
     import src.infra.claude_agent as claude_module
 
     async def _fake_query(*, prompt: str, options: Any) -> Any:
-        """Yield a tool-use turn, its (failed) result, then a text answer."""
+        """Yield a tool-use turn, its result, then a text answer."""
         _ = (prompt, options)
         yield AssistantMessage(
             content=[ToolUseBlock(id="t1", name="Bash", input={"command": "ls"})],
@@ -972,18 +972,17 @@ async def test_ask_ephemeral_captures_tools_and_text(monkeypatch: Any) -> None:
     out = await backend.ask_ephemeral(5, "hi", allowed_tools=("Bash",))
 
     assert out.text == "done"
-    assert len(out.tool_events) == 1
-    assert out.tool_events[0]["tool"] == "Bash"
-    assert out.tool_events[0]["is_error"] is True
 
 
 def test_transcript_path_derives_from_cwd() -> None:
-    """The jsonl transcript path is derived from the cwd and session id."""
+    """The jsonl transcript path falls back to a cwd-derived path when no file exists."""
     backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
-    path = backend._transcript_path("abc123")
+    # A made-up session id has no file on disk, so the glob misses and the
+    # cwd-derived fallback path is returned.
+    path = backend._transcript_path("does-not-exist-xyz")
     assert path is not None
-    assert path.endswith("/.claude/projects/-vault/abc123.jsonl")
-    # No session id (or no cwd) yields no path.
+    assert path.endswith("/.claude/projects/-vault/does-not-exist-xyz.jsonl")
+    # No session id yields no path.
     assert backend._transcript_path(None) is None
 
 

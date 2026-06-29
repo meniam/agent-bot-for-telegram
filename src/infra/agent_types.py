@@ -5,7 +5,7 @@ classes. Provider adapters keep Claude / Codex / PI wire details inside infra.
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -29,15 +29,13 @@ class StreamChunk:
 class EphemeralResult:
     """Outcome of an ephemeral (scheduled-task) turn: reply plus run metadata.
 
-    ``session_id`` / ``transcript_path`` point at the SDK jsonl transcript for
-    later analysis; ``tool_events`` lists each tool/skill the model invoked
-    (``{"tool", "input", "is_error"}``), used to write the per-run tool log.
+    ``session_id`` / ``transcript_path`` point at the SDK jsonl transcript, which
+    the task runner copies next to the run history for later analysis.
     """
 
     text: str
     session_id: str | None = None
     transcript_path: str | None = None
-    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentTurnReset(RuntimeError):

@@ -22,9 +22,6 @@ from claude_agent_sdk import (
     StreamEvent,
     TextBlock,
     ToolPermissionContext,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
     query,
 )
 
@@ -544,18 +541,23 @@ class ClaudeAgentBackend(BaseAgentBackend):
         return title[:_TITLE_MAX_LEN]
 
     def _transcript_path(self, session_id: str | None) -> str | None:
-        """Best-effort path to the SDK jsonl transcript for ``session_id``.
+        """Locate the SDK jsonl transcript the CLI wrote for ``session_id``.
 
-        The Claude CLI persists every run (even stateless ``query()``) under
-        ``~/.claude/projects/<cwd-key>/<session_id>.jsonl``, where the key is the
-        absolute cwd with ``/`` replaced by ``-``. Recorded as text for later
-        analysis; ``session_id`` remains the authoritative handle if the path
-        ever drifts.
+        The Claude CLI persists every run (even stateless ``query()``) as
+        ``~/.claude/projects/<cwd-key>/<session_id>.jsonl``. Glob for it so the
+        exact project-key encoding never has to be reproduced; fall back to the
+        ``<cwd>``-derived path when no file is found yet.
         """
-        if not session_id or not self._cwd:
+        if not session_id:
             return None
-        key = str(Path(self._cwd).resolve()).replace("/", "-")
-        return str(Path.home() / ".claude" / "projects" / key / f"{session_id}.jsonl")
+        base = Path.home() / ".claude" / "projects"
+        matches = sorted(base.glob(f"*/{session_id}.jsonl"))
+        if matches:
+            return str(matches[0])
+        if self._cwd:
+            key = str(Path(self._cwd).resolve()).replace("/", "-")
+            return str(base / key / f"{session_id}.jsonl")
+        return None
 
     async def ask_ephemeral(
         self, chat_id: int, prompt: str, *, allowed_tools: tuple[str, ...]
@@ -567,9 +569,8 @@ class ClaudeAgentBackend(BaseAgentBackend):
         only tools in ``allowed_tools`` are allowed; everything else is denied
         silently (no Telegram gate — nobody is watching a background run).
 
-        Captures the run's ``session_id`` and each tool/skill invocation from the
-        message stream (no hooks needed) so the task runner can record a
-        transcript pointer and a tool log next to the run history.
+        Captures the run's ``session_id`` from the message stream so the task
+        runner can copy the SDK jsonl transcript next to the run history.
         """
         allow = set(allowed_tools)
 
@@ -606,31 +607,18 @@ class ClaudeAgentBackend(BaseAgentBackend):
             }
 
         parts: list[str] = []
-        tool_events: list[dict[str, Any]] = []
-        by_id: dict[str, dict[str, Any]] = {}
         session_id: str | None = None
         async for msg in query(prompt=_prompt_stream(), options=options):
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         parts.append(block.text)
-                    elif isinstance(block, ToolUseBlock):
-                        event = {"tool": block.name, "input": block.input, "is_error": None}
-                        tool_events.append(event)
-                        by_id[block.id] = event
-            elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
-                for block in msg.content:
-                    if isinstance(block, ToolResultBlock):
-                        event = by_id.get(block.tool_use_id)
-                        if event is not None:
-                            event["is_error"] = bool(block.is_error)
             elif isinstance(msg, ResultMessage):
                 session_id = msg.session_id
         return EphemeralResult(
             text="".join(parts).strip(),
             session_id=session_id,
             transcript_path=self._transcript_path(session_id),
-            tool_events=tool_events,
         )
 
     async def reset(self, chat_id: int) -> None:

@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -102,21 +103,6 @@ class TaskStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            Path(tmp).replace(path)
-            self._secure_file(path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
-
-    def _atomic_write_text(self, path: Path, text: str) -> None:
-        """Write ``text`` atomically and durably (temp, fsync, replace)."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".tasks_")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(text)
                 f.flush()
                 os.fsync(f.fileno())
             Path(tmp).replace(path)
@@ -299,78 +285,41 @@ class TaskStore:
             await asyncio.to_thread(self._append_history_sync, run)
 
     def _prune_history(self, hdir: Path) -> None:
-        """Delete the oldest history records (and their tool logs) beyond the limit."""
+        """Delete the oldest history records (and their transcripts) beyond the limit."""
         records = sorted(hdir.glob("*.json"))
         excess = len(records) - self._history_limit
         for path in records[:excess]:
             path.unlink(missing_ok=True)
-            # Drop the paired tool log (<stamp>.tools.log) if one was written.
-            path.with_name(f"{path.stem}.tools.log").unlink(missing_ok=True)
+            # Drop the paired jsonl transcript (<stamp>.jsonl) if one was copied.
+            path.with_name(f"{path.stem}.jsonl").unlink(missing_ok=True)
 
-    _TOOL_BRIEF_KEYS = ("command", "file_path", "path", "pattern", "url", "query", "prompt")
-
-    @classmethod
-    def _brief_tool_input(cls, inp: Any) -> str:
-        """Collapse a tool input to one short line for the activity log."""
-        text = ""
-        if isinstance(inp, dict):
-            for key in cls._TOOL_BRIEF_KEYS:
-                value = inp.get(key)
-                if isinstance(value, str) and value:
-                    text = value
-                    break
-            else:
-                text = json.dumps(inp, ensure_ascii=False)
-        elif inp is not None:
-            text = str(inp)
-        text = " ".join(text.split())
-        return text[:200] + ("…" if len(text) > 200 else "")
-
-    def _write_tool_log_sync(
-        self,
-        task_id: str,
-        started_at: datetime,
-        *,
-        session_id: str | None,
-        transcript_path: str | None,
-        events: list[dict[str, Any]],
+    def _copy_transcript_sync(
+        self, task_id: str, started_at: datetime, src: Path
     ) -> None:
+        if not src.is_file():
+            log.warning("task store: transcript not found, skipping copy: %s", src)
+            return
         hdir = self._history_dir(task_id)
         hdir.mkdir(parents=True, exist_ok=True)
         self._secure_dir(hdir)
         stamp = started_at.astimezone().isoformat().replace(":", "-")
-        lines = [
-            f"session_id: {session_id or '-'}",
-            f"transcript: {transcript_path or '-'}",
-            f"tool calls: {len(events)}",
-            "",
-        ]
-        for i, event in enumerate(events, 1):
-            status = "error" if event.get("is_error") else "ok"
-            tool = str(event.get("tool", ""))
-            brief = self._brief_tool_input(event.get("input"))
-            lines.append(f"{i:>3}. {tool:<14} {brief}  [{status}]")
-        self._atomic_write_text(hdir / f"{stamp}.tools.log", "\n".join(lines) + "\n")
+        dst = hdir / f"{stamp}.jsonl"
+        fd, tmp = tempfile.mkstemp(dir=str(dst.parent), suffix=".tmp", prefix=".tasks_")
+        os.close(fd)
+        try:
+            shutil.copyfile(src, tmp)
+            Path(tmp).replace(dst)
+            self._secure_file(dst)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
-    async def append_tool_log(
-        self,
-        task_id: str,
-        started_at: datetime,
-        *,
-        session_id: str | None,
-        transcript_path: str | None,
-        events: list[dict[str, Any]],
+    async def copy_transcript(
+        self, task_id: str, started_at: datetime, src: Path
     ) -> None:
-        """Write the per-run tool/skill activity log next to the run record."""
+        """Copy the run's SDK jsonl transcript next to its history record."""
         async with self._lock:
-            await asyncio.to_thread(
-                self._write_tool_log_sync,
-                task_id,
-                started_at,
-                session_id=session_id,
-                transcript_path=transcript_path,
-                events=events,
-            )
+            await asyncio.to_thread(self._copy_transcript_sync, task_id, started_at, src)
 
     def _list_history_sync(self, task_id: str) -> list[TaskRun]:
         hdir = self._history_dir(task_id)
