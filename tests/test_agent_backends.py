@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-import src.infra.codex_agent as codex_agent_module
 import src.infra.pi_agent as pi_agent_module
 from src.config import BotConfig
 from src.infra.agent_factory import create_agent_backend
@@ -118,6 +117,62 @@ async def test_claude_resume_failure_falls_back_to_fresh_session(
     assert client is created[1]
     # Store now points at the freshly minted session, not the broken one.
     assert await store.current_id(42) == created[1].options.session_id
+
+
+@pytest.mark.asyncio
+async def test_claude_backend_times_out_silent_event_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a silent Claude event stream times out and interrupts the turn."""
+    import src.infra.claude_agent as claude_module
+
+    created: list[Any] = []
+
+    class _SilentClient:
+        """Stub SDK client whose event stream never yields."""
+
+        def __init__(self, options: Any) -> None:
+            """Record the options and register this client instance."""
+            self.options = options
+            self.interrupted = False
+            created.append(self)
+
+        async def __aenter__(self) -> "_SilentClient":
+            """Enter the context."""
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            """Exit the context."""
+            return
+
+        async def query(self, _prompt: str) -> None:
+            """Accept the prompt without emitting anything."""
+            return
+
+        async def interrupt(self) -> None:
+            """Record that the stalled turn was interrupted."""
+            self.interrupted = True
+
+        async def _stream(self) -> Any:
+            """Yield nothing — block until cancelled."""
+            await asyncio.sleep(3600)
+            yield  # pragma: no cover - never reached
+
+        def receive_response(self) -> Any:
+            """Return the never-yielding event stream."""
+            return self._stream()
+
+    monkeypatch.setattr(claude_module, "ClaudeSDKClient", _SilentClient)
+
+    backend = ClaudeAgentBackend(
+        _store(), system_prompt="x", idle_ttl_sec=0, event_timeout_sec=0.01
+    )
+
+    with pytest.raises(RuntimeError, match="event stream timed out"):
+        _ = [chunk async for chunk in backend.ask_stream(10, "hello")]
+
+    assert len(created) == 1
+    assert created[0].interrupted is True
 
 
 class _FakeResult:
@@ -610,18 +665,16 @@ async def test_codex_backend_passes_working_dir_to_thread_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_backend_times_out_silent_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_codex_backend_times_out_silent_run() -> None:
     """Verify a silent Codex run times out and cancels the turn."""
     events: list[tuple[int, str, str, dict[str, Any]]] = []
     fake = _SlowCodex()
-    monkeypatch.setattr(codex_agent_module, "CODEX_RUN_TIMEOUT_SEC", 0.01)
     backend = CodexAgentBackend(
         session_store=_store(),
         system_prompt="system",
         on_tool_event=lambda *args: _record(events, *args),
         codex_factory=lambda: fake,
+        event_timeout_sec=0.01,
     )
 
     with pytest.raises(RuntimeError, match="Codex run timed out"):
@@ -767,18 +820,16 @@ async def test_pi_backend_sends_image_attachments(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_pi_backend_times_out_silent_event_stream(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_pi_backend_times_out_silent_event_stream() -> None:
     """Verify a silent PI event stream times out and aborts the run."""
     events: list[tuple[int, str, str, dict[str, Any]]] = []
     fake = _SilentPiTransport()
-    monkeypatch.setattr(pi_agent_module, "PI_EVENT_TIMEOUT_SEC", 0.01)
     backend = PiAgentBackend(
         session_store=_store(),
         system_prompt="",
         on_tool_event=lambda *args: _record(events, *args),
         transport_factory=lambda _model: fake,
+        event_timeout_sec=0.01,
     )
 
     with pytest.raises(RuntimeError, match="event stream timed out"):

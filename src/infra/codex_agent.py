@@ -62,9 +62,11 @@ class CodexAgentBackend(BaseAgentBackend):
         sandbox: str = "workspace_write",
         approval_mode: str = "default",
         codex_factory: Callable[[], Any] | None = None,
+        event_timeout_sec: float = CODEX_RUN_TIMEOUT_SEC,
     ) -> None:
         """Configure prompt, cwd, model, sandbox, approval mode, and session maps."""
         self._init_base(session_store, idle_ttl_sec)
+        self._event_timeout = event_timeout_sec
         self._system_prompt = system_prompt
         self._cwd = cwd
         self._add_dirs = list(add_dirs) if add_dirs else []
@@ -311,11 +313,11 @@ class CodexAgentBackend(BaseAgentBackend):
         if not hasattr(turn, "__await__"):
             return turn
         try:
-            return await asyncio.wait_for(turn, timeout=CODEX_RUN_TIMEOUT_SEC)
+            return await asyncio.wait_for(turn, timeout=self._event_timeout)
         except TimeoutError:
             msg = (
                 "Codex run timed out after "
-                f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"
+                f"{self._event_timeout:.0f}s waiting for completion"
             )
             log.warning("%s (chat_id=%s)", msg, chat_id)
             session = self._sessions.get(chat_id)
@@ -347,7 +349,7 @@ class CodexAgentBackend(BaseAgentBackend):
                 try:
                     event = await asyncio.wait_for(
                         stream.__anext__(),
-                        timeout=CODEX_RUN_TIMEOUT_SEC,
+                        timeout=self._event_timeout,
                     )
                 except StopAsyncIteration:
                     break
@@ -405,7 +407,7 @@ class CodexAgentBackend(BaseAgentBackend):
         """
         msg = (
             "Codex run timed out after "
-            f"{CODEX_RUN_TIMEOUT_SEC:.0f}s waiting for completion"
+            f"{self._event_timeout:.0f}s waiting for completion"
         )
         log.warning("%s (chat_id=%s)", msg, chat_id)
         session = self._sessions.get(chat_id)

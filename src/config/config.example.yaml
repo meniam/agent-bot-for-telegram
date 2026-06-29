@@ -86,6 +86,10 @@ brain:
       Be concise.
     # Hard timeout for one agent turn, including tool calls and approvals.
     agent_timeout_sec: 600
+    # Max silence between backend events before a stalled turn is interrupted.
+    # Guards against wedged tool/MCP calls (e.g. deep-research). Any event resets
+    # it. Raise it if heavy tools legitimately run silent for long.
+    agent_event_timeout_sec: 120
     # Close idle per-chat sessions after this many seconds; 0 disables GC.
     session_idle_ttl_sec: 2592000
 

@@ -286,9 +286,11 @@ class PiAgentBackend(BaseAgentBackend):
         tools_mode: str = "default",
         session_persistence: bool = False,
         transport_factory: Callable[[str | None], PiRpcTransport] | None = None,
+        event_timeout_sec: float = PI_EVENT_TIMEOUT_SEC,
     ) -> None:
         """Configure prompt, cwd, model, CLI/transport, and per-chat session maps."""
         self._init_base(session_store, idle_ttl_sec)
+        self._event_timeout = event_timeout_sec
         self._system_prompt = system_prompt
         self._cwd = cwd
         self._add_dirs = list(add_dirs) if add_dirs else []
@@ -405,12 +407,12 @@ class PiAgentBackend(BaseAgentBackend):
         try:
             return await asyncio.wait_for(
                 session.transport.next_event(),
-                timeout=PI_EVENT_TIMEOUT_SEC,
+                timeout=self._event_timeout,
             )
         except TimeoutError:
             msg = (
                 "PI RPC event stream timed out after "
-                f"{PI_EVENT_TIMEOUT_SEC:.0f}s waiting for the next event"
+                f"{self._event_timeout:.0f}s waiting for the next event"
             )
             log.warning("%s (chat_id=%s)", msg, chat_id)
             await self._emit_lifecycle(

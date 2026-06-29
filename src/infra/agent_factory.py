@@ -56,6 +56,7 @@ def create_agent_backend(
             graphiti_server_factory=graphiti_server_factory,
             lang=cfg.lang,
             dangerously_skip_permissions=cfg.agent_dangerously_skip_permissions,
+            event_timeout_sec=cfg.agent_event_timeout_sec,
         )
     if cfg.agent_provider == "codex":
         return CodexAgentBackend(
@@ -69,6 +70,7 @@ def create_agent_backend(
             sandbox=cfg.codex_sandbox,
             approval_mode=cfg.codex_approval_mode,
             codex_factory=codex_factory,
+            event_timeout_sec=cfg.agent_event_timeout_sec,
         )
     if cfg.agent_provider == "pi":
         return PiAgentBackend(
@@ -83,5 +85,6 @@ def create_agent_backend(
             tools_mode=cfg.pi_tools_mode,
             session_persistence=cfg.pi_session_persistence,
             transport_factory=pi_transport_factory,
+            event_timeout_sec=cfg.agent_event_timeout_sec,
         )
     raise ValueError(f"unsupported agent provider: {cfg.agent_provider}")

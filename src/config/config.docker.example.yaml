@@ -58,6 +58,8 @@ brain:
     dangerously_skip_permissions: true
     working_path: /vault
     agent_timeout_sec: 3600
+    # Max silence between backend events before a stalled turn is interrupted.
+    agent_event_timeout_sec: 120
     session_idle_ttl_sec: 2592000
     system_prompt: >-
       Ты дружелюбный веселый и ироничный ассистент в Telegram по имени Браин.

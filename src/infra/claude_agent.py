@@ -6,7 +6,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -24,7 +24,7 @@ from claude_agent_sdk import (
 )
 
 from .agent_base import BaseAgentBackend
-from .agent_types import StreamChunk, ToolEventCallback
+from .agent_types import AgentEventStreamTimeout, StreamChunk, ToolEventCallback
 from .session_store import Session, SessionStore
 from .task_tool import TASK_TOOL_NAME
 
@@ -45,6 +45,11 @@ PermissionCallback = Callable[
 ]
 
 _TOOL_POST_PREVIEW_NAMES = ("Monitor", "TaskOutput")
+
+# Watchdog: max silence between SDK events before a turn is treated as stalled.
+# Matches the PI/Codex backends. Any event (delta, tool, lifecycle) resets it;
+# only total silence (e.g. a wedged MCP/web-fetch call) trips it.
+CLAUDE_EVENT_TIMEOUT_SEC = 120.0
 
 CLAUDE_MODES: tuple[str, ...] = ("default", "acceptEdits", "plan")
 CLAUDE_MODELS: tuple[tuple[str, str], ...] = (
@@ -76,9 +81,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
         ) = None,
         lang: str = "en",
         dangerously_skip_permissions: bool = False,
+        event_timeout_sec: float = CLAUDE_EVENT_TIMEOUT_SEC,
     ) -> None:
         """Configure prompt, cwd, model, hooks, and the per-chat client maps."""
         self._init_base(session_store, idle_ttl_sec)
+        self._event_timeout = event_timeout_sec
         self._on_permission = on_permission
         self._system_prompt = system_prompt
         self._lang = lang
@@ -343,7 +350,17 @@ class ClaudeAgentBackend(BaseAgentBackend):
             client = await self._get_client(chat_id)
             await client.query(prompt)
             saw_delta = False
-            async for msg in client.receive_response():
+            events = client.receive_response()
+            while True:
+                try:
+                    msg = await asyncio.wait_for(
+                        events.__anext__(),
+                        timeout=self._event_timeout,
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    await self._on_event_timeout(chat_id, client)
                 if isinstance(msg, StreamEvent):
                     event = msg.event
                     delta = event.get("delta", {})
@@ -359,6 +376,24 @@ class ClaudeAgentBackend(BaseAgentBackend):
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             yield StreamChunk(kind="text", text=block.text)
+
+    async def _on_event_timeout(
+        self, chat_id: int, client: ClaudeSDKClient
+    ) -> NoReturn:
+        """Interrupt a stalled turn and raise ``AgentEventStreamTimeout``.
+
+        Called when the SDK emits no event for ``self._event_timeout`` seconds —
+        e.g. a wedged MCP/web-fetch tool call during deep-research. Best-effort
+        interrupts the live turn so the session is reusable, then always raises.
+        """
+        msg = (
+            "Claude event stream timed out after "
+            f"{self._event_timeout:.0f}s waiting for the next event"
+        )
+        log.warning("%s (chat_id=%s)", msg, chat_id)
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        raise AgentEventStreamTimeout(msg) from None
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]:
         """Return the SDK's token/context-window stats for the chat."""

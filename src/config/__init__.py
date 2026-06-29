@@ -123,6 +123,8 @@ AGENT_CONFIG_FIELDS: dict[str, str] = {
     "working_path": "working_dir",
     "timeout_sec": "agent_timeout_sec",
     "agent_timeout_sec": "agent_timeout_sec",
+    "event_timeout_sec": "agent_event_timeout_sec",
+    "agent_event_timeout_sec": "agent_event_timeout_sec",
     "session_idle_ttl_sec": "session_idle_ttl_sec",
 }
 
@@ -160,6 +162,10 @@ class BotConfig(BaseModel):
     draft_interval_sec: float = 0.2
     approval_timeout_sec: int = 300
     agent_timeout_sec: int = 600
+    # Max silence (seconds) between agent backend events before a turn is treated
+    # as stalled and interrupted. Guards against wedged tool/MCP calls; any event
+    # resets it. Applies to all backends (claude/codex/pi).
+    agent_event_timeout_sec: int = 120
     session_idle_ttl_sec: int = 86400
     chat_logger_capacity: int = 256
     working_dir: str | None = None
@@ -482,6 +488,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "draft_interval_sec",
         "approval_timeout_sec",
         "agent_timeout_sec",
+        "agent_event_timeout_sec",
         "session_idle_ttl_sec",
         "chat_logger_capacity",
         "lang",
