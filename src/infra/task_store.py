@@ -7,6 +7,7 @@ is appended):
     <tasks_dir>/<chat_id>.json            user-scoped task definitions
     <tasks_dir>/global.json               global (admin) task definitions
     <tasks_dir>/history/<task_id>/<ts>.json   append-only run history
+    <tasks_dir>/history/<task_id>/events/<ts>.json non-execution audit events
     <tasks_dir>/_corrupt/<chat_id>.<ts>.json  quarantined unparsable files
 
 Each definition file is ``{"updated_at": <iso>, "tasks": [ ... ]}``.
@@ -31,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .task_types import Task, TaskRun
+from .task_types import Task, TaskAuditEvent, TaskRun
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ class TaskStore:
         if not _TASK_ID_RE.match(task_id):
             raise ValueError(f"unsafe task id: {task_id!r}")
         return self._base / "history" / task_id
+
+    def _events_dir(self, task_id: str) -> Path:
+        """Return a task's non-execution audit-event directory."""
+        return self._history_dir(task_id) / "events"
 
     # ----- low-level io ----------------------------------------------------
 
@@ -210,6 +215,20 @@ class TaskStore:
         """Every enabled task whose next_run_at is at or before ``now``."""
         return await asyncio.to_thread(self._list_due_sync, now)
 
+    def _list_running_sync(self) -> list[Task]:
+        """Return all persisted tasks currently marked as running."""
+        running: list[Task] = []
+        for path in self._all_files():
+            for task in self._read_file(path):
+                if task.state == "running":
+                    running.append(task)
+        running.sort(key=lambda t: t.created_at, reverse=True)
+        return running
+
+    async def list_running(self) -> list[Task]:
+        """Return all tasks persisted as running across user and global scopes."""
+        return await asyncio.to_thread(self._list_running_sync)
+
     def _get_sync(self, task_id: str) -> Task | None:
         for path in self._all_files():
             for task in self._read_file(path):
@@ -292,6 +311,37 @@ class TaskStore:
             path.unlink(missing_ok=True)
             # Drop the paired jsonl transcript (<stamp>.jsonl) if one was copied.
             path.with_name(f"{path.stem}.jsonl").unlink(missing_ok=True)
+            for sidecar in hdir.glob(f"{path.stem}.*.json"):
+                sidecar.unlink(missing_ok=True)
+
+    def _append_audit_event_sync(self, event: TaskAuditEvent) -> None:
+        events_dir = self._events_dir(event.task_id)
+        events_dir.mkdir(parents=True, exist_ok=True)
+        self._secure_dir(events_dir)
+        stamp = event.occurred_at.astimezone().isoformat().replace(":", "-")
+        self._atomic_write(events_dir / f"{stamp}.json", event.model_dump(mode="json"))
+
+    async def append_audit_event(self, event: TaskAuditEvent) -> None:
+        """Append one non-execution audit event for a task."""
+        async with self._lock:
+            await asyncio.to_thread(self._append_audit_event_sync, event)
+
+    def _list_audit_events_sync(self, task_id: str) -> list[TaskAuditEvent]:
+        events_dir = self._events_dir(task_id)
+        if not events_dir.exists():
+            return []
+        events: list[TaskAuditEvent] = []
+        for path in sorted(events_dir.glob("*.json")):
+            try:
+                with path.open(encoding="utf-8") as f:
+                    events.append(TaskAuditEvent.model_validate(json.load(f)))
+            except (OSError, ValueError):
+                log.warning("task store: skipping invalid audit event %s", path)
+        return events
+
+    async def list_audit_events(self, task_id: str) -> list[TaskAuditEvent]:
+        """Return a task's non-execution audit events oldest-first."""
+        return await asyncio.to_thread(self._list_audit_events_sync, task_id)
 
     def _copy_transcript_sync(
         self, task_id: str, started_at: datetime, src: Path
@@ -349,7 +399,4 @@ class TaskStore:
             return
         if not hdir.exists():
             return
-        for path in hdir.glob("*.json"):
-            path.unlink(missing_ok=True)
-        with contextlib.suppress(OSError):
-            hdir.rmdir()
+        shutil.rmtree(hdir, ignore_errors=True)

@@ -17,7 +17,6 @@ import contextlib
 import logging
 import os
 from functools import partial
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import aiohttp
@@ -40,6 +39,7 @@ from .infra.logs import BotLogs, setup_console
 from .infra.session_store import SessionStore
 from .infra.skills_linker import link_skills
 from .infra.streaming import DraftStreamer
+from .infra.task_logging import TaskLogHandle, attach_task_log
 from .infra.task_runner import TaskRunner
 from .infra.task_scheduler import TaskScheduler
 from .infra.task_store import TaskStore
@@ -133,36 +133,21 @@ def _make_logs(cfg: BotConfig) -> tuple[BotLogs, logging.Logger, Path | None]:
     return bot_logs, bot_logs.general, bot_log_dir
 
 
-def _attach_task_log(tasks_dir: Path) -> None:
-    """Tee the full task lifecycle into ``<tasks_dir>/tasks.log`` (idempotent).
+def _attach_task_log(bot_name: str, tasks_dir: Path) -> TaskLogHandle:
+    """Tee one bot's task lifecycle into ``<tasks_dir>/tasks.log``.
 
-    The scheduler, runner, and ephemeral-run loggers get a rotating file handler
-    so every fire, lock wait, tool call, the agent's own messages, and errors sit
-    right next to the task ``.json`` — tail it to see exactly what a background
-    run did and where it stalled.
+    The handler is filtered by task log context, so shared module loggers can be
+    used without cross-writing between bots with different ``tasks_dir`` values.
     """
     base = TaskRunner.__module__.rsplit(".", 1)[0]  # e.g. "src.infra"
     names = (
         f"{base}.task_scheduler",
         f"{base}.task_runner",
+        f"{base}.task_store",
+        f"{base}.task_tool",
         f"{base}.claude_agent.ephemeral",
     )
-    handler = RotatingFileHandler(
-        tasks_dir / "tasks.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8"
-    )
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
-    for name in names:
-        lg = logging.getLogger(name)
-        # Don't stack a second handler for the same file when re-entered.
-        if any(
-            getattr(h, "baseFilename", None) == handler.baseFilename
-            for h in lg.handlers
-        ):
-            continue
-        lg.setLevel(logging.INFO)
-        lg.addHandler(handler)
+    return attach_task_log(bot_name=bot_name, tasks_dir=tasks_dir, logger_names=names)
 
 
 def _make_transcriber(
@@ -280,10 +265,11 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     # expose a per-chat `task` tool that reuses the same permission/scan rules.
     tasks: TaskStore | None = None
     task_service: TaskService | None = None
+    task_log_handle: TaskLogHandle | None = None
     if cfg.tasks_enabled and cfg.tasks_dir:
         tasks = TaskStore(Path(cfg.tasks_dir), history_limit=cfg.tasks_history_limit)
         task_service = TaskService(tasks, cfg, running_logs=running_logs)
-        _attach_task_log(Path(cfg.tasks_dir))
+        task_log_handle = _attach_task_log(cfg.name, Path(cfg.tasks_dir))
         glog.info(
             "[%s] tasks: %s (log: %s)",
             cfg.name,
@@ -430,6 +416,8 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         glog.info("[%s] shutting down", cfg.name)
         if scheduler is not None:
             await scheduler.stop()
+        if task_log_handle is not None:
+            task_log_handle.close()
         await agent.close_all()
         await bot.session.close()
         bot_logs.close()

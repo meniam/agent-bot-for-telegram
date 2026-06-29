@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from src.config import BotConfig
-from src.infra.agent_types import EphemeralResult
+from src.infra.agent_types import AgentEventStreamTimeout, EphemeralResult
+from src.infra.task_logging import attach_task_log, redact, task_log_context
 from src.infra.task_runner import TaskRunner, broadcast_targets
 from src.infra.task_store import TaskStore, new_task_id
 from src.infra.task_types import Task, TaskSchedule
@@ -37,15 +39,25 @@ class _FakeAgent:
         prompt: str,
         *,
         allowed_tools: tuple[str, ...],
-        on_session_path=None,  # noqa: ANN001 - test stub
+        on_session_path: Callable[[str], None] | None = None,
+        idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """Emit a live transcript path, then return a canned result."""
-        _ = (chat_id, prompt, allowed_tools)
+        _ = (chat_id, prompt, allowed_tools, idle_timeout_sec)
         if on_session_path is not None:
             on_session_path(f"/live/{self._transcript.name}")
         return EphemeralResult(
             text="answer", session_id="sess-1", transcript_path=str(self._transcript)
         )
+
+
+class _FailingDeliveryBot(_FakeBot):
+    """Fake bot whose delivery callback always raises."""
+
+    async def deliver(self, chat_id: int, output: str) -> None:
+        """Raise a delivery failure for the given chat."""
+        _ = (chat_id, output)
+        raise RuntimeError("telegram denied token=secret")
 
 
 def _cfg(tmp_path: Path, **over: object) -> BotConfig:
@@ -158,6 +170,80 @@ async def test_history_written(tmp_path: Path) -> None:
     assert runs[0].status == "ok"
 
 
+async def test_delivery_failure_is_persisted(tmp_path: Path) -> None:
+    """A successful execution with failed delivery records delivery failure details."""
+    cfg = _cfg(tmp_path)
+    bot = _FailingDeliveryBot()
+    runner = _runner(tmp_path, bot, cfg)
+    (tmp_path / "scripts" / "h.py").write_text("print('x')", encoding="utf-8")
+    task = _script_task("h.py")
+
+    outcome = await runner.run(task)
+
+    assert outcome.status == "ok"
+    assert outcome.delivery_status == "failed"
+    assert outcome.error == "delivery_failed"
+    store = TaskStore(tmp_path / "tasks")
+    runs = await store.list_history(task.id)
+    assert runs[0].delivery_status == "failed"
+    assert runs[0].delivery_errors
+
+
+async def test_llm_provider_error_is_persisted(tmp_path: Path) -> None:
+    """An LLM provider terminal error marks the task run as error."""
+    cfg = _cfg(tmp_path)
+    bot = _FakeBot()
+    store = TaskStore(tmp_path / "tasks")
+
+    class _ErrorAgent:
+        """Agent stub returning provider error metadata."""
+
+        async def ask_ephemeral(
+            self,
+            chat_id: int,
+            prompt: str,
+            *,
+            allowed_tools: tuple[str, ...],
+            on_session_path: Callable[[str], None] | None = None,
+            idle_timeout_sec: int | None = None,
+        ) -> EphemeralResult:
+            """Return an errored ephemeral result."""
+            _ = (chat_id, prompt, allowed_tools, on_session_path, idle_timeout_sec)
+            return EphemeralResult(
+                text="",
+                session_id="sess-err",
+                is_error=True,
+                api_error_status="rate_limit",
+                permission_denials=["Bash denied"],
+            )
+
+    runner = TaskRunner(
+        deliver=bot.deliver,
+        cfg=cfg,
+        store=store,
+        agent=_ErrorAgent(),  # type: ignore[arg-type]
+        log_for_chat=lambda _cid: logging.getLogger("test"),
+        workdir_lock=asyncio.Lock(),
+    )
+    task = Task(
+        id=new_task_id(),
+        owner_chat_id=10,
+        scope="user",
+        kind="llm",
+        prompt="research X",
+        schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+    outcome = await runner.run(task)
+
+    assert outcome.status == "error"
+    assert outcome.error == "rate_limit"
+    runs = await store.list_history(task.id)
+    assert runs[0].status == "error"
+    assert runs[0].provider_api_error_status == "rate_limit"
+    assert runs[0].provider_permission_denials == ["Bash denied"]
+
+
 async def test_llm_run_copies_transcript_and_records_log_path(tmp_path: Path) -> None:
     """An LLM run copies the SDK transcript and records its path as log_path."""
     cfg = _cfg(tmp_path)
@@ -227,10 +313,11 @@ async def test_llm_run_publishes_live_log_then_clears(tmp_path: Path) -> None:
             prompt: str,
             *,
             allowed_tools: tuple[str, ...],
-            on_session_path=None,  # noqa: ANN001 - test stub
+            on_session_path: Callable[[str], None] | None = None,
+            idle_timeout_sec: int | None = None,
         ) -> EphemeralResult:
             """Publish a live path and capture the shared map's state."""
-            _ = (chat_id, prompt, allowed_tools)
+            _ = (chat_id, prompt, allowed_tools, idle_timeout_sec)
             if on_session_path is not None:
                 on_session_path("/live/run.jsonl")
             mid.update(running_logs)  # runner has stored it by now
@@ -258,3 +345,141 @@ async def test_llm_run_publishes_live_log_then_clears(tmp_path: Path) -> None:
 
     assert mid.get(task.id) == "/live/run.jsonl"  # published while running
     assert running_logs == {}  # cleared once finished
+
+
+async def test_llm_idle_timeout_is_recorded_and_clears_live_log(
+    tmp_path: Path,
+) -> None:
+    """An ephemeral idle timeout records an error run and clears live log state."""
+    cfg = _cfg(tmp_path, tasks_llm_idle_timeout_sec=123)
+    bot = _FakeBot()
+    store = TaskStore(tmp_path / "tasks")
+    running_logs: dict[str, str] = {}
+
+    class _IdleTimeoutAgent:
+        """Agent stub that simulates the backend idle watchdog firing."""
+
+        async def ask_ephemeral(
+            self,
+            chat_id: int,
+            prompt: str,
+            *,
+            allowed_tools: tuple[str, ...],
+            on_session_path: Callable[[str], None] | None = None,
+            idle_timeout_sec: int | None = None,
+        ) -> EphemeralResult:
+            """Publish a live path, verify timeout wiring, then raise."""
+            _ = (chat_id, prompt, allowed_tools)
+            assert idle_timeout_sec == 123
+            if on_session_path is not None:
+                on_session_path("/live/idle.jsonl")
+            raise AgentEventStreamTimeout("silent")
+
+    runner = TaskRunner(
+        deliver=bot.deliver,
+        cfg=cfg,
+        store=store,
+        agent=_IdleTimeoutAgent(),  # type: ignore[arg-type]
+        log_for_chat=lambda _cid: logging.getLogger("test"),
+        workdir_lock=asyncio.Lock(),
+        running_logs=running_logs,
+    )
+    task = Task(
+        id=new_task_id(),
+        owner_chat_id=10,
+        scope="user",
+        kind="llm",
+        prompt="research X",
+        schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+    outcome = await runner.run(task)
+
+    assert outcome.status == "error"
+    assert outcome.error == "llm_idle_timeout after 123s"
+    assert running_logs == {}
+    assert bot.sent == []
+    runs = await store.list_history(task.id)
+    assert runs[0].status == "error"
+    assert runs[0].error == "llm_idle_timeout after 123s"
+
+
+async def test_llm_total_timeout_is_recorded(tmp_path: Path) -> None:
+    """A scheduled LLM total timeout records an error run."""
+    cfg = _cfg(tmp_path, tasks_llm_timeout_sec=456)
+    bot = _FakeBot()
+    store = TaskStore(tmp_path / "tasks")
+
+    class _TotalTimeoutAgent:
+        """Agent stub that simulates the outer wait_for timing out."""
+
+        async def ask_ephemeral(
+            self,
+            chat_id: int,
+            prompt: str,
+            *,
+            allowed_tools: tuple[str, ...],
+            on_session_path: Callable[[str], None] | None = None,
+            idle_timeout_sec: int | None = None,
+        ) -> EphemeralResult:
+            """Publish a live path, then raise TimeoutError."""
+            _ = (chat_id, prompt, allowed_tools, idle_timeout_sec)
+            if on_session_path is not None:
+                on_session_path("/live/total.jsonl")
+            raise TimeoutError
+
+    runner = TaskRunner(
+        deliver=bot.deliver,
+        cfg=cfg,
+        store=store,
+        agent=_TotalTimeoutAgent(),  # type: ignore[arg-type]
+        log_for_chat=lambda _cid: logging.getLogger("test"),
+        workdir_lock=asyncio.Lock(),
+    )
+    task = Task(
+        id=new_task_id(),
+        owner_chat_id=10,
+        scope="user",
+        kind="llm",
+        prompt="research X",
+        schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+    outcome = await runner.run(task)
+
+    assert outcome.status == "error"
+    assert outcome.error == "llm_timeout after 456s"
+    runs = await store.list_history(task.id)
+    assert runs[0].status == "error"
+    assert runs[0].error == "llm_timeout after 456s"
+
+
+def test_task_log_handler_filters_by_context(tmp_path: Path) -> None:
+    """Two task log handlers on one module logger only write their own bot context."""
+    logger_name = f"test.tasklog.{new_task_id()}"
+    logger = logging.getLogger(logger_name)
+    logger.propagate = False
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    a = attach_task_log(bot_name="a", tasks_dir=a_dir, logger_names=(logger_name,))
+    b = attach_task_log(bot_name="b", tasks_dir=b_dir, logger_names=(logger_name,))
+    try:
+        with task_log_context("a", "task-a"):
+            logger.info("only a")
+        with task_log_context("b", "task-b"):
+            logger.info("only b")
+    finally:
+        a.close()
+        b.close()
+
+    assert "only a" in (a_dir / "tasks.log").read_text(encoding="utf-8")
+    assert "only b" not in (a_dir / "tasks.log").read_text(encoding="utf-8")
+    assert "only b" in (b_dir / "tasks.log").read_text(encoding="utf-8")
+    assert "only a" not in (b_dir / "tasks.log").read_text(encoding="utf-8")
+
+
+def test_task_log_redacts_secret_strings() -> None:
+    """Plain task-log strings redact common secret assignments."""
+    assert redact("token=abc password:xyz ok") == "token=<redacted> password=<redacted> ok"

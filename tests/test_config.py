@@ -329,6 +329,8 @@ def test_tasks_section_loads(tmp_path: Path) -> None:
             tick_interval_sec: 30
             max_output_chars: 1000
             script_timeout_sec: 120
+            llm_timeout_sec: 3600
+            llm_idle_timeout_sec: 300
             history_limit: 50
             allowed_tools: [Read, Grep]
         """,
@@ -340,6 +342,8 @@ def test_tasks_section_loads(tmp_path: Path) -> None:
     assert Path(cfg.tasks_dir).is_dir()
     assert cfg.tasks_scripts_dir is not None and Path(cfg.tasks_scripts_dir).is_dir()
     assert cfg.tasks_tick_interval_sec == 30
+    assert cfg.tasks_llm_timeout_sec == 3600
+    assert cfg.tasks_llm_idle_timeout_sec == 300
     assert cfg.tasks_history_limit == 50
     assert cfg.tasks_allowed_tools == ("Read", "Grep")
     assert cfg.admin_chat_ids == (111, 222)
@@ -352,7 +356,27 @@ def test_tasks_absent_defaults_disabled(tmp_path: Path) -> None:
     assert cfg.tasks_enabled is False
     assert cfg.tasks_dir is None
     assert cfg.tasks_allowed_tools is None  # read-only default resolved at runtime
+    assert cfg.tasks_llm_timeout_sec == 7200
+    assert cfg.tasks_llm_idle_timeout_sec == 600
     assert cfg.admin_chat_ids == ()
+
+
+def test_tasks_llm_timeouts_accept_zero(tmp_path: Path) -> None:
+    """Verify zero disables scheduled LLM timeout watchdogs."""
+    p = _write_yaml(
+        tmp_path,
+        """
+        alpha:
+          gateway:
+            telegram_bot_token: "1:abc"
+          tasks:
+            llm_timeout_sec: 0
+            llm_idle_timeout_sec: 0
+        """,
+    )
+    cfg = load(p)["alpha"]
+    assert cfg.tasks_llm_timeout_sec == 0
+    assert cfg.tasks_llm_idle_timeout_sec == 0
 
 
 def test_is_admin_fail_closed() -> None:

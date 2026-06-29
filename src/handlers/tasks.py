@@ -25,7 +25,7 @@ from aiogram import Dispatcher
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from ..infra.task_types import Task, TaskScope
+from ..infra.task_types import Task, TaskRun, TaskScope
 from ..services.task_service import (
     TaskError,
     TaskNotFoundError,
@@ -58,6 +58,7 @@ def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
     tr = ctx.tr
     state_label = {
         "scheduled": tr.t("task_state_scheduled"),
+        "running": tr.t("task_state_running"),
         "paused": tr.t("task_state_paused"),
         "error": tr.t("task_state_error"),
     }
@@ -69,9 +70,9 @@ def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
     for t in tasks:
         name = t.name or (t.prompt or t.script or t.id)[:24]
         nxt = t.next_run_at.strftime("%d.%m %H:%M") if t.next_run_at else "—"
-        # A task running right now (tracked live by the scheduler) overrides its
-        # persisted state, which is still "scheduled" mid-run.
-        if t.id in ctx.running_task_ids:
+        # A live in-memory run or a persisted recovery-visible running state
+        # should render as running.
+        if t.id in ctx.running_task_ids or t.state == "running":
             status = tr.t("task_state_running")
         else:
             status = state_label.get(t.state, t.state)
@@ -80,6 +81,39 @@ def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
         )
     table = f"{tr.t('task_table_title')}\n\n{head}\n" + "\n".join(rows)
     return f"{table}\n\n{tr.t('task_legend')}"
+
+
+def _fmt_last_run(ctx: BotContext, run: TaskRun | None, live_log: str | None) -> str:
+    """Format the latest run audit block for `/task show`."""
+    if run is None and live_log is None:
+        return ""
+    lines: list[str] = []
+    if run is not None:
+        finished = run.finished_at.strftime("%Y-%m-%d %H:%M")
+        lines.append(
+            ctx.tr.t(
+                "task_show_last_run",
+                status=run.status,
+                finished=finished,
+                duration_ms=run.duration_ms,
+            )
+        )
+        lines.append(
+            ctx.tr.t(
+                "task_show_delivery",
+                status=run.delivery_status,
+                delivered=len(run.delivered_to),
+                failed=len(run.delivery_errors),
+            )
+        )
+        if run.error:
+            lines.append(ctx.tr.t("task_show_error", error=run.error))
+        log_path = live_log or run.log_path
+        if log_path:
+            lines.append(ctx.tr.t("task_show_log", path=log_path))
+    elif live_log is not None:
+        lines.append(ctx.tr.t("task_show_log", path=live_log))
+    return "\n" + "\n".join(lines) if lines else ""
 
 
 async def tasks_cmd(
@@ -180,7 +214,9 @@ async def _add(
     cl: logging.Logger,
 ) -> None:
     """Create a task from the `add` argument string and confirm it."""
-    assert ctx.task_service is not None
+    if ctx.task_service is None:
+        await send_md(message, ctx.tr.t("task_disabled"))
+        return
     try:
         parsed = _parse_add(rest)
     except ValueError as e:
@@ -215,7 +251,9 @@ async def _add(
 
 async def _list(ctx: BotContext, message: Message, chat_id: int) -> None:
     """Reply with the caller's visible tasks as a line list."""
-    assert ctx.task_service is not None
+    if ctx.task_service is None:
+        await send_md(message, ctx.tr.t("task_disabled"))
+        return
     tasks = await ctx.task_service.list(chat_id)
     if not tasks:
         await send_md(message, ctx.tr.t("task_list_empty"))
@@ -235,7 +273,9 @@ async def _by_id(
     cl: logging.Logger,
 ) -> None:
     """Apply an id-targeted action (show/pause/resume/run/rm) and confirm."""
-    assert ctx.task_service is not None
+    if ctx.task_service is None:
+        await send_md(message, ctx.tr.t("task_disabled"))
+        return
     try:
         task = await ctx.task_service.act(chat_id, action, task_id)
     except TaskNotFoundError:
@@ -243,7 +283,9 @@ async def _by_id(
         return
 
     if action == "show":
-        await send_md(message, _fmt_line(task))
+        last = await ctx.task_service.last_run(chat_id, task.id)
+        live_log = ctx.task_service.live_log_path(task.id)
+        await send_md(message, _fmt_line(task) + _fmt_last_run(ctx, last, live_log))
     elif action == "rm":
         cl.info("task removed %s", task.id)
         await send_md(message, ctx.tr.t("task_removed", id=task.id))
@@ -260,4 +302,3 @@ def register(dp: Dispatcher) -> None:
     """Register the `/tasks` and `/task` command handlers on ``dp``."""
     dp.message.register(tasks_cmd, Command("tasks"))
     dp.message.register(task_cmd, Command("task"))
-

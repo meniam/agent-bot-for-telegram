@@ -5,7 +5,7 @@ classes. Provider adapters keep Claude / Codex / PI wire details inside infra.
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -36,6 +36,12 @@ class EphemeralResult:
     text: str
     session_id: str | None = None
     transcript_path: str | None = None
+    is_error: bool = False
+    subtype: str | None = None
+    stop_reason: str | None = None
+    api_error_status: str | None = None
+    permission_denials: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 class AgentTurnReset(RuntimeError):
@@ -90,6 +96,7 @@ class AgentBackend(Protocol):
         *,
         allowed_tools: tuple[str, ...],
         on_session_path: "Callable[[str], None] | None" = None,
+        idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """One-shot turn in a throwaway session (for scheduled LLM tasks).
 
@@ -100,9 +107,10 @@ class AgentBackend(Protocol):
         Returns the reply text plus run metadata (session id, transcript path).
         ``on_session_path`` (optional) is called once with the live provider
         transcript path as soon as the session id is known, so a caller can
-        surface a tail-able log while the run is still in flight. Backends
-        without a stateless turn primitive may raise ``NotImplementedError``
-        (Codex and PI currently do).
+        surface a tail-able log while the run is still in flight.
+        ``idle_timeout_sec`` bounds silence between backend events; ``None`` or
+        ``0`` disables the watchdog. Backends without a stateless turn primitive
+        may raise ``NotImplementedError`` (Codex and PI currently do).
         """
         ...
 

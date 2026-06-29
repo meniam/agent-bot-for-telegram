@@ -18,7 +18,7 @@
 ## ✨ Highlights
 
 - 🪄 **Custom slash commands — killer feature.** Drop a `*.md` file into `commands_dir`, get a Telegram bot command. Body is the prompt; `$ARGUMENTS` substitutes whatever the user typed. Ship `/recall`, `/today`, `/standup`, `/capture` to your team **without touching code**. See [COMMANDS.md](COMMANDS.md).
-- ⏰ **Scheduled & recurring tasks.** `/task add <once|interval|cron> | <prompt>` schedules an LLM turn; admins can schedule shell/Python **script** tasks and **global** ones. The agent can even schedule its own follow-ups via a per-chat MCP task tool. Background scheduler fires due tasks, no double-firing, with run history. See [CONFIG.md](CONFIG.md).
+- ⏰ **Scheduled & recurring tasks.** `/task add <once|interval|cron> | <prompt>` schedules an LLM turn; admins can schedule shell/Python **script** tasks and **global** ones. The agent can even schedule its own follow-ups via a per-chat MCP task tool. Background scheduler fires due tasks, no double-firing, with run history. See [CONFIG.md](CONFIG.md) and [docs/tasks.md](docs/tasks.md).
 - 🤖 **Claude, Codex, or PI.dev backend** — choose `agent_provider` per configured Telegram bot.
 - 💬 **Named multi-sessions per chat** — each chat owns several named sessions; `/sess` lists / switches them, `/new` starts a fresh one. Metadata lives in the per-chat SQLite; legacy session JSON migrates in on first start.
 - ✨ **Rich messages (Bot API 10.1)** — `sendRichMessage` rendering with headings, tables, spoilers, `mark`/`sub`/`sup`/`details`.
@@ -66,6 +66,7 @@ Drop `*.md` files into `commands_dir` to expose reusable workflows (`/recall`, `
 | [INSTALLATION.md](INSTALLATION.md) | Step-by-step setup, multi-bot config, troubleshooting. |
 | [CONFIG.md](CONFIG.md) | Every `BotConfig` field — type, default, validation, env override. |
 | [COMMANDS.md](COMMANDS.md) | Custom slash commands: frontmatter, `$ARGUMENTS`, examples. |
+| [docs/tasks.md](docs/tasks.md) | Scheduled task storage, scheduler/runner lifecycle, timeouts, and recovery. |
 | [AGENTS.md](AGENTS.md) | Architecture reference for LLM agents working in this repo. |
 | [CLAUDE.md](CLAUDE.md) | Short orientation pinned to the repo for Claude Code. |
 

@@ -30,6 +30,7 @@ dependencies = [
 dev = [
     "ruff>=0.6",
     "mypy>=1.10",
+    "pyright>=1.1",
     "pip-audit>=2.7",
     "bandit>=1.7",
     "pytest>=8.0",
@@ -85,6 +86,11 @@ warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = false  # SDK hook callbacks are intentionally untyped
 ignore_missing_imports = true
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

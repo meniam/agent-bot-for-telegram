@@ -18,9 +18,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 TaskKind = Literal["llm", "script"]
 TaskScope = Literal["user", "global"]
-TaskState = Literal["scheduled", "paused", "completed", "error"]
+TaskState = Literal["scheduled", "running", "paused", "completed", "error"]
 ScheduleKind = Literal["once", "interval", "cron"]
 RunStatus = Literal["ok", "error"]
+DeliveryStatus = Literal["not_attempted", "all_delivered", "partial", "failed"]
+TaskAuditEventKind = Literal[
+    "skipped_stale",
+    "completed_stale",
+    "access_revoked",
+    "history_write_failed",
+]
 
 # One-shot tasks may fire this many seconds late and still count as a catch-up
 # rather than a stale miss (mirrors Hermes ONESHOT_GRACE_SECONDS).
@@ -100,6 +107,8 @@ class Task(BaseModel):
 class TaskRun(BaseModel):
     """One append-only history record for a single execution."""
 
+    model_config = ConfigDict(extra="ignore")
+
     task_id: str
     scope: TaskScope
     kind: TaskKind
@@ -111,11 +120,40 @@ class TaskRun(BaseModel):
     output: str = ""
     error: str | None = None
     delivered_to: list[int] = Field(default_factory=list)
+    delivery_status: DeliveryStatus = "not_attempted"
+    delivery_errors: dict[str, str] = Field(default_factory=dict)
+    scheduled_for: datetime | None = None
+    dispatched_at: datetime | None = None
+    serialized_wait_ms: int | None = None
+    execute_ms: int | None = None
+    delivery_ms: int | None = None
+    record_ms: int | None = None
     # LLM runs only: the SDK session id and the full path to the jsonl
     # transcript copied next to this record, for later analysis. None for
     # script runs (or when the transcript could not be located).
     session_id: str | None = None
     log_path: str | None = None
+    transcript_error: str | None = None
+    provider_is_error: bool | None = None
+    provider_subtype: str | None = None
+    provider_stop_reason: str | None = None
+    provider_api_error_status: str | None = None
+    provider_permission_denials: list[str] = Field(default_factory=list)
+    provider_errors: list[str] = Field(default_factory=list)
+
+
+class TaskAuditEvent(BaseModel):
+    """One durable non-execution audit event for a scheduled task."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    task_id: str
+    scope: TaskScope
+    kind: TaskKind
+    event: TaskAuditEventKind
+    occurred_at: datetime
+    scheduled_for: datetime | None = None
+    details: dict[str, str] = Field(default_factory=dict)
 
 
 _DURATION_RE = re.compile(r"^(\d+)\s*(m|min|mins|minute|minutes|h|hour|hours|d|day|days)$")

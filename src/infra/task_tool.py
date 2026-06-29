@@ -130,6 +130,11 @@ def make_task_handler(
                     payload["last_run"] = {
                         "status": last.status,
                         "finished_at": last.finished_at.isoformat(),
+                        "duration_ms": last.duration_ms,
+                        "error": last.error,
+                        "delivery_status": last.delivery_status,
+                        "delivered_to": last.delivered_to,
+                        "delivery_errors": last.delivery_errors,
                         "session_id": last.session_id,
                         "log_path": last.log_path,
                     }

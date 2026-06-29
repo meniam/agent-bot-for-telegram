@@ -3,14 +3,14 @@
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 import src.infra.pi_agent as pi_agent_module
 from src.config import BotConfig
 from src.infra.agent_factory import create_agent_backend
-from src.infra.agent_types import StreamChunk
+from src.infra.agent_types import AgentEventStreamTimeout, StreamChunk
 from src.infra.claude_agent import ClaudeAgentBackend
 from src.infra.codex_agent import CodexAgentBackend
 from src.infra.pi_agent import PiAgentBackend
@@ -1009,6 +1009,69 @@ async def test_ask_ephemeral_ignores_tool_blocks_returns_text(monkeypatch: Any) 
     assert out.text == "done"
 
 
+async def test_ask_ephemeral_idle_timeout_closes_stream(
+    monkeypatch: Any,
+) -> None:
+    """Verify an idle ephemeral stream times out and closes its iterator."""
+    import src.infra.claude_agent as claude_module
+
+    class _FakeSystemMessage:
+        """Minimal stand-in for the SDK SystemMessage."""
+
+        def __init__(self, data: dict[str, str]) -> None:
+            """Store SDK-like system payload data."""
+            self.data = data
+
+    class _SilentAfterInit:
+        """Yield one init event, then stay silent until cancelled."""
+
+        def __init__(self) -> None:
+            """Initialize iterator state."""
+            self.sent_init = False
+            self.closed = False
+
+        def __aiter__(self) -> "_SilentAfterInit":
+            """Return this object as its async iterator."""
+            return self
+
+        async def __anext__(self) -> object:
+            """Yield init once, then wait forever."""
+            if not self.sent_init:
+                self.sent_init = True
+                return _FakeSystemMessage({"session_id": "sess-timeout"})
+            await asyncio.sleep(3600)
+            raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            """Record that the stream was closed."""
+            self.closed = True
+
+    stream = _SilentAfterInit()
+    paths: list[str] = []
+
+    def _query(*, prompt: object, options: object) -> _SilentAfterInit:
+        """Return the silent stream without awaiting, matching SDK query."""
+        _ = (prompt, options)
+        return stream
+
+    monkeypatch.setattr(claude_module, "SystemMessage", _FakeSystemMessage)
+    monkeypatch.setattr(claude_module, "query", _query)
+
+    backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
+    with pytest.raises(AgentEventStreamTimeout, match="timed out"):
+        await backend.ask_ephemeral(
+            5,
+            "hi",
+            allowed_tools=("Read",),
+            on_session_path=paths.append,
+            idle_timeout_sec=cast(int, 0.01),
+        )
+
+    assert stream.closed is True
+    assert len(paths) == 1
+    assert paths[0].endswith("sess-timeout.jsonl")
+
+
 def test_transcript_path_derives_from_cwd() -> None:
     """The jsonl transcript path falls back to a cwd-derived path when no file exists."""
     backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
@@ -1034,6 +1097,18 @@ async def test_ask_ephemeral_not_supported_on_codex() -> None:
     )
     with pytest.raises(NotImplementedError):
         await backend.ask_ephemeral(1, "x", allowed_tools=())
+
+
+async def test_ask_ephemeral_not_supported_on_pi() -> None:
+    """Verify PI accepts the timeout argument while rejecting ephemeral turns."""
+    backend = PiAgentBackend(session_store=_store(), system_prompt="", idle_ttl_sec=0)
+    with pytest.raises(NotImplementedError):
+        await backend.ask_ephemeral(
+            1,
+            "x",
+            allowed_tools=(),
+            idle_timeout_sec=1,
+        )
 
 
 # --- PiRpcProcess subprocess-protocol hardening -----------------------------

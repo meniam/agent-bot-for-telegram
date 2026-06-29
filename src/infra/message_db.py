@@ -339,20 +339,32 @@ def search_messages(
         return []
     limit = max(1, min(limit, MESSAGES_MAX_LIMIT))
 
-    where, params = _filters(session_id, role, since, until)
-    clause = f"AND {where}" if where else ""
-    # `clause` is fixed column predicates; all user values are bound params.
     sql = (
-        "SELECT m.ts, m.created_at, m.session_id, m.role, m.tool, m.level, "  # noqa: S608  # nosec B608
+        "SELECT m.ts, m.created_at, m.session_id, m.role, m.tool, m.level, "
         "m.message, s.title AS session_title, "
         "snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet "
         "FROM messages_fts f "
         "JOIN messages m ON m.id = f.rowid "
         "LEFT JOIN sessions s ON s.id = m.session_id "
-        f"WHERE messages_fts MATCH ? {clause} "
+        "WHERE messages_fts MATCH ? "
+        "AND (? IS NULL OR m.session_id = ?) "
+        "AND (? IS NULL OR m.role = ?) "
+        "AND (? IS NULL OR m.ts >= ?) "
+        "AND (? IS NULL OR m.ts <= ?) "
         "ORDER BY bm25(messages_fts) LIMIT ?"
     )
-    bound: list[Any] = [query, *params, limit]
+    bound: list[Any] = [
+        query,
+        session_id,
+        session_id,
+        role,
+        role,
+        since,
+        since,
+        until,
+        until,
+        limit,
+    ]
 
     try:
         conn = connect(db_path)

@@ -437,6 +437,8 @@ brain:
     tick_interval_sec: 60
     max_output_chars: 4000
     script_timeout_sec: 300
+    llm_timeout_sec: 7200
+    llm_idle_timeout_sec: 600
     history_limit: 100
     allowed_tools: [Read, Glob, Grep, WebFetch]
 ```
@@ -453,6 +455,10 @@ brain:
 - `max_output_chars` — output truncation for delivery and history. Default
   `4000`.
 - `script_timeout_sec` — hard timeout for one script run. Default `300`.
+- `llm_timeout_sec` — hard wall-clock timeout for one scheduled LLM run.
+  Default `7200`; `0` disables the total timeout.
+- `llm_idle_timeout_sec` — max silence between SDK events during a scheduled
+  LLM run. Default `600`; `0` disables the idle watchdog.
 - `history_limit` — max run-history records kept per task; oldest pruned.
   Default `100`.
 - `allowed_tools` — tools an LLM task may use **without interactive approval**
@@ -465,6 +471,8 @@ backlog). After downtime a one-shot past its 120s grace is marked `completed`
 without running; a recurring run later than its grace window (period/2, clamped
 to 2 min – 2 h) is fast-forwarded instead of fired. Worst case is one catch-up
 run per task, never a flood.
+
+Developer architecture details live in [docs/tasks.md](docs/tasks.md).
 
 ---
 

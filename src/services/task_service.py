@@ -32,7 +32,7 @@ _THREAT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 )
 
 # Zero-width / bidi control characters used to smuggle hidden instructions.
-_INVISIBLE = re.compile(r"[​-‏‪-‮⁠-⁤﻿]")
+_INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
 
 class TaskError(Exception):
     """Base for task-operation failures; ``str(e)`` is user-facing."""

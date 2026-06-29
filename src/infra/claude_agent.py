@@ -37,6 +37,7 @@ from .agent_types import (
     ToolEventCallback,
 )
 from .session_store import Session, SessionStore
+from .task_logging import redact
 from .task_tool import TASK_TOOL_NAME
 
 log = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _short_json(value: Any, limit: int = 300) -> str:
     import json
 
     try:
-        text = json.dumps(value, ensure_ascii=False, default=str)
+        text = json.dumps(redact(value), ensure_ascii=False, default=str)
     except Exception:
         text = str(value)
     return text if len(text) <= limit else text[:limit] + "…"
@@ -63,7 +64,7 @@ def _short_text(value: Any, limit: int = 300) -> str:
         value = " ".join(
             b.get("text", "") for b in value if isinstance(b, dict)
         )
-    text = str(value)
+    text = str(redact(value))
     return text if len(text) <= limit else text[:limit] + "…"
 
 _TITLE_MAX_LEN = 60
@@ -595,6 +596,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
         *,
         allowed_tools: tuple[str, ...],
         on_session_path: Callable[[str], None] | None = None,
+        idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """Run a one-shot agent turn in a throwaway session for a scheduled task.
 
@@ -613,7 +615,8 @@ class ClaudeAgentBackend(BaseAgentBackend):
         Captures the run's ``session_id`` from the message stream so the task
         runner can copy the SDK jsonl transcript next to the run history. When
         the id first appears (the ``init`` system message), ``on_session_path``
-        is invoked with the live provider transcript path.
+        is invoked with the live provider transcript path. ``idle_timeout_sec``
+        bounds silence between SDK events; ``None`` or ``0`` disables it.
         """
         allow = set(allowed_tools)
         skip_perms = self._dangerously_skip_permissions
@@ -686,8 +689,50 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         parts: list[str] = []
         session_id: str | None = None
+        is_error = False
+        subtype: str | None = None
+        stop_reason: str | None = None
+        api_error_status: str | None = None
+        permission_denials: list[str] = []
+        errors: list[str] = []
+        idle_timeout = (
+            float(idle_timeout_sec)
+            if idle_timeout_sec is not None and idle_timeout_sec > 0
+            else None
+        )
         eph_log.info("run begin chat_id=%s prompt=%r", chat_id, prompt[:160])
-        async for msg in query(prompt=_prompt_stream(), options=options):
+        stream = query(prompt=_prompt_stream(), options=options)
+        iterator = aiter(stream)
+        while True:
+            try:
+                if idle_timeout is not None:
+                    try:
+                        msg = await asyncio.wait_for(
+                            iterator.__anext__(),
+                            timeout=idle_timeout,
+                        )
+                    except TimeoutError:
+                        transcript_path = self._transcript_path(session_id)
+                        timeout_msg = (
+                            "Claude ephemeral event stream timed out after "
+                            f"{idle_timeout:.0f}s waiting for the next event"
+                        )
+                        if session_id:
+                            timeout_msg += f" (session_id={session_id})"
+                        if transcript_path:
+                            timeout_msg += f" (transcript_path={transcript_path})"
+                        eph_log.warning("%s (chat_id=%s)", timeout_msg, chat_id)
+                        closer = getattr(iterator, "aclose", None)
+                        if closer is not None:
+                            with contextlib.suppress(Exception):
+                                result = closer()
+                                if hasattr(result, "__await__"):
+                                    await result
+                        raise AgentEventStreamTimeout(timeout_msg) from None
+                else:
+                    msg = await iterator.__anext__()
+            except StopAsyncIteration:
+                break
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
@@ -714,6 +759,16 @@ class ClaudeAgentBackend(BaseAgentBackend):
                             )
             elif isinstance(msg, ResultMessage):
                 session_id = msg.session_id
+                is_error = bool(msg.is_error)
+                subtype = msg.subtype
+                stop_reason = msg.stop_reason
+                api_error_status = (
+                    str(msg.api_error_status)
+                    if msg.api_error_status is not None
+                    else None
+                )
+                permission_denials = [str(x) for x in (msg.permission_denials or [])]
+                errors = [str(x) for x in (msg.errors or [])]
                 level = logging.ERROR if msg.is_error else logging.INFO
                 eph_log.log(
                     level,
@@ -745,6 +800,12 @@ class ClaudeAgentBackend(BaseAgentBackend):
             text="".join(parts).strip(),
             session_id=session_id,
             transcript_path=self._transcript_path(session_id),
+            is_error=is_error,
+            subtype=subtype,
+            stop_reason=stop_reason,
+            api_error_status=api_error_status,
+            permission_denials=permission_denials,
+            errors=errors,
         )
 
     async def reset(self, chat_id: int) -> None:

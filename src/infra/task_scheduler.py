@@ -23,11 +23,13 @@ from datetime import datetime
 from pathlib import Path
 
 from ..config import BotConfig, is_admin
+from .task_logging import task_log_context
 from .task_runner import TaskRunner
 from .task_store import TaskStore
 from .task_types import (
     ONESHOT_GRACE_SECONDS,
     Task,
+    TaskAuditEvent,
     compute_grace_seconds,
     compute_next_run,
 )
@@ -125,9 +127,11 @@ class TaskScheduler:
 
     async def _notify_death(self, exc: BaseException) -> None:
         """Await the death notifier, swallowing its failures."""
-        assert self._on_loop_death is not None
+        notifier = self._on_loop_death
+        if notifier is None:
+            return
         try:
-            await self._on_loop_death(exc)
+            await notifier(exc)
         except Exception:
             self._glog.exception(
                 "[%s] scheduler loop-death notify failed", self._cfg.name
@@ -140,6 +144,7 @@ class TaskScheduler:
         The heartbeat is refreshed after every pass (success or caught error) so
         it proves the loop is cycling, not that any one tick succeeded.
         """
+        await self._recover_interrupted_running()
         await self._write_heartbeat()  # mark alive before the first tick
         while True:
             try:
@@ -150,6 +155,43 @@ class TaskScheduler:
                 self._glog.exception("[%s] task scheduler tick failed", self._cfg.name)
             await self._write_heartbeat()
             await asyncio.sleep(self._tick)
+
+    async def _recover_interrupted_running(self) -> None:
+        """Mark persisted running tasks from a previous process as interrupted.
+
+        The in-memory ``_running`` set protects tasks this scheduler instance is
+        actually executing. After a process restart that set is empty, so any
+        persisted ``running`` state is stale and must become a durable error
+        instead of a forever-running phantom.
+        """
+        now = self._now()
+        for task in await self._store.list_running():
+            if task.id in self._running:
+                continue
+            recurring = task.schedule.kind != "once"
+            has_future_run = (
+                task.next_run_at is not None and task.next_run_at > now
+            )
+            updates: dict[str, object] = {
+                "state": "error",
+                "last_status": "error",
+                "last_error": "interrupted_by_restart",
+            }
+            if task.schedule.kind == "once":
+                updates["enabled"] = False
+                updates["next_run_at"] = None
+            elif recurring:
+                updates["enabled"] = has_future_run
+            recovered = task.model_copy(update=updates)
+            with task_log_context(self._cfg.name, task.id):
+                log.warning(
+                    "[%s] task %s recovered stale running state enabled=%s next_run_at=%s",
+                    self._cfg.name,
+                    task.id,
+                    recovered.enabled,
+                    recovered.next_run_at,
+                )
+            await self._store.update(recovered)
 
     async def _write_heartbeat(self) -> None:
         """Rewrite the heartbeat file with the current time (best-effort)."""
@@ -173,7 +215,8 @@ class TaskScheduler:
         write.
         """
         path = self._heartbeat_path
-        assert path is not None
+        if path is None:
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".hb_")
         try:
@@ -195,6 +238,18 @@ class TaskScheduler:
                 continue
             decision = self._grace_decision(task, now)
             if decision == "complete":
+                with task_log_context(self._cfg.name, task.id):
+                    log.info(
+                        "[%s] task %s missed one-shot window — completed without run",
+                        self._cfg.name,
+                        task.id,
+                    )
+                await self._record_audit(
+                    task,
+                    "completed_stale",
+                    now,
+                    details={"reason": "missed_one_shot_window"},
+                )
                 await self._store.update(
                     task.model_copy(
                         update={
@@ -204,23 +259,26 @@ class TaskScheduler:
                         }
                     )
                 )
-                log.info(
-                    "[%s] task %s missed one-shot window — completed without run",
-                    self._cfg.name,
-                    task.id,
-                )
                 continue
             if decision == "skip":
                 nxt = compute_next_run(task.schedule, last_run=now, now=now)
-                await self._store.update(task.model_copy(update={"next_run_at": nxt}))
-                log.info(
-                    "[%s] task %s missed its window — fast-forwarded to %s",
-                    self._cfg.name,
-                    task.id,
-                    nxt,
+                with task_log_context(self._cfg.name, task.id):
+                    log.info(
+                        "[%s] task %s missed its window — fast-forwarded to %s",
+                        self._cfg.name,
+                        task.id,
+                        nxt,
+                    )
+                await self._record_audit(
+                    task,
+                    "skipped_stale",
+                    now,
+                    details={"reason": "missed_recurring_window", "next_run_at": str(nxt)},
                 )
+                await self._store.update(task.model_copy(update={"next_run_at": nxt}))
                 continue
-            log.info("[%s] task %s due — dispatching", self._cfg.name, task.id)
+            with task_log_context(self._cfg.name, task.id):
+                log.info("[%s] task %s due — dispatching", self._cfg.name, task.id)
             self._running.add(task.id)
             job = asyncio.create_task(self._run_tracked(task, now))
             self._inflight.add(job)
@@ -250,16 +308,48 @@ class TaskScheduler:
 
     async def _revoke(self, task: Task) -> None:
         """Pause a task whose owner lost access, recording ``access_revoked``."""
-        self._glog.warning(
-            "[%s] task %s owner %s lost access — pausing",
-            self._cfg.name,
-            task.id,
-            task.owner_chat_id,
+        now = self._now()
+        with task_log_context(self._cfg.name, task.id):
+            self._glog.warning(
+                "[%s] task %s owner %s lost access — pausing",
+                self._cfg.name,
+                task.id,
+                task.owner_chat_id,
+            )
+        await self._record_audit(
+            task,
+            "access_revoked",
+            now,
+            details={"owner_chat_id": str(task.owner_chat_id)},
         )
         revoked = task.model_copy(
             update={"enabled": False, "state": "paused", "last_error": "access_revoked"}
         )
         await self._store.update(revoked)
+
+    async def _record_audit(
+        self,
+        task: Task,
+        event: str,
+        occurred_at: datetime,
+        *,
+        details: dict[str, str] | None = None,
+    ) -> None:
+        """Persist a non-execution audit event, logging but not crashing on failure."""
+        try:
+            await self._store.append_audit_event(
+                TaskAuditEvent(
+                    task_id=task.id,
+                    scope=task.scope,
+                    kind=task.kind,
+                    event=event,  # type: ignore[arg-type]
+                    occurred_at=occurred_at,
+                    scheduled_for=task.next_run_at,
+                    details=details or {},
+                )
+            )
+        except Exception:
+            log.exception("[%s] task %s audit event write failed", self._cfg.name, task.id)
 
     async def _run_tracked(self, task: Task, now: datetime) -> None:
         """Advance scheduling, run the task, persist its final state.
@@ -267,6 +357,11 @@ class TaskScheduler:
         Always clears the task from the in-flight set; advancing before the run
         prevents a slow run from double-firing.
         """
+        with task_log_context(self._cfg.name, task.id):
+            await self._run_tracked_in_context(task, now)
+
+    async def _run_tracked_in_context(self, task: Task, now: datetime) -> None:
+        """Advance scheduling, run the task, and settle it inside task log context."""
         try:
             # Advance scheduling BEFORE running so a slow run can't double-fire.
             pre = self._advance_before_run(task, now)
@@ -279,7 +374,11 @@ class TaskScheduler:
                 pre.next_run_at,
             )
 
-            outcome = await self._runner.run(pre)
+            outcome = await self._runner.run(
+                pre,
+                scheduled_for=task.next_run_at,
+                dispatched_at=now,
+            )
 
             final = self._finalize_after_run(pre, outcome.status, outcome.error, now)
             await self._store.update(final)
@@ -299,9 +398,13 @@ class TaskScheduler:
     def _advance_before_run(self, task: Task, now: datetime) -> Task:
         """Move ``next_run_at`` forward (recurring) or clear it (one-shot)."""
         if task.schedule.kind == "once":
-            return task.model_copy(update={"next_run_at": None})
+            return task.model_copy(
+                update={"state": "running", "next_run_at": None, "last_error": None}
+            )
         nxt = compute_next_run(task.schedule, last_run=now, now=now)
-        return task.model_copy(update={"next_run_at": nxt})
+        return task.model_copy(
+            update={"state": "running", "next_run_at": nxt, "last_error": None}
+        )
 
     def _finalize_after_run(
         self, task: Task, status: str, error: str | None, now: datetime

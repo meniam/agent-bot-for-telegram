@@ -173,6 +173,27 @@ async def test_show_running_returns_live_log_path(tmp_path: Path) -> None:
     assert out["log_path"] == "/root/.claude/projects/-vault/sess-9.jsonl"
 
 
+async def test_show_persisted_running_without_live_log(tmp_path: Path) -> None:
+    """Show returns persisted running state even without an in-memory live log."""
+    store = TaskStore(tmp_path)
+    svc = TaskService(store, _cfg())
+    handle = make_task_handler(USER, svc)
+
+    task_id = _payload(
+        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
+    )["task"]["id"]
+    task = await store.get(task_id)
+    assert task is not None
+    await store.update(task.model_copy(update={"state": "running"}))
+
+    out = _payload(await handle({"action": "show", "task_id": task_id}))
+
+    assert out["success"] is True
+    assert out["task"]["state"] == "running"
+    assert "running" not in out
+    assert "log_path" not in out
+
+
 async def test_show_without_runs_omits_last_run(tmp_path: Path) -> None:
     """Show on a never-run task omits the last_run block."""
     handle = _handler(tmp_path)

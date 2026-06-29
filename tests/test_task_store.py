@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.infra.task_store import TaskStore, new_task_id
-from src.infra.task_types import Task, TaskRun, TaskSchedule
+from src.infra.task_types import Task, TaskAuditEvent, TaskRun, TaskSchedule
 
 NOW = datetime(2026, 6, 22, 9, 0, 0, tzinfo=UTC)
 
@@ -57,6 +57,19 @@ async def test_list_due_spans_user_and_global(tmp_path: Path) -> None:
     assert len(due) == 3  # two users + one global, future & paused excluded
 
 
+async def test_list_running(tmp_path: Path) -> None:
+    """Listing running tasks spans files and excludes other states."""
+    store = TaskStore(tmp_path)
+    running = await store.add(
+        _task(chat_id=10, next_run_at=NOW).model_copy(update={"state": "running"})
+    )
+    await store.add(_task(chat_id=20, next_run_at=NOW))
+
+    listed = await store.list_running()
+
+    assert [task.id for task in listed] == [running.id]
+
+
 async def test_list_all_isolates_users(tmp_path: Path) -> None:
     """Listing a user's tasks isolates them but can include global tasks."""
     store = TaskStore(tmp_path)
@@ -79,6 +92,39 @@ async def test_remove(tmp_path: Path) -> None:
     assert await store.remove(t) is True
     assert await store.get(t.id) is None
     assert await store.remove(t) is False
+
+
+async def test_remove_deletes_history_transcripts_and_events(tmp_path: Path) -> None:
+    """Removing a task deletes JSON history, transcript copies, and event sidecars."""
+    store = TaskStore(tmp_path)
+    task = await store.add(_task(chat_id=10, next_run_at=NOW))
+    run = TaskRun(
+        task_id=task.id,
+        scope="user",
+        kind="llm",
+        started_at=NOW,
+        finished_at=NOW,
+        duration_ms=0,
+        status="ok",
+    )
+    await store.append_history(run)
+    src = tmp_path / "source.jsonl"
+    src.write_text('{"ok": true}\n', encoding="utf-8")
+    await store.copy_transcript(task.id, NOW, src)
+    await store.append_audit_event(
+        TaskAuditEvent(
+            task_id=task.id,
+            scope="user",
+            kind="llm",
+            event="skipped_stale",
+            occurred_at=NOW,
+        )
+    )
+
+    hdir = tmp_path / "history" / task.id
+    assert hdir.exists()
+    assert await store.remove(task) is True
+    assert not hdir.exists()
 
 
 async def test_corrupt_file_is_quarantined(tmp_path: Path) -> None:

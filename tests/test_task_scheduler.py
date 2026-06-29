@@ -23,7 +23,7 @@ class _RecordingRunner:
         """Initialize an empty record of executed task ids."""
         self.ran: list[str] = []
 
-    async def run(self, task: Task) -> object:
+    async def run(self, task: Task, **_: object) -> object:
         """Record the task id and return a stub success outcome."""
         self.ran.append(task.id)
 
@@ -136,6 +136,51 @@ async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
     assert stored.next_run_at is None
 
 
+async def test_due_task_is_persisted_running_before_runner(
+    tmp_path: Path,
+) -> None:
+    """A due task is stored as running before the runner executes it."""
+    seen: list[str] = []
+
+    class _StateObservingRunner:
+        """Runner that reads the task state from the store mid-run."""
+
+        def __init__(self, store: TaskStore) -> None:
+            """Store the task store to inspect during execution."""
+            self._store = store
+
+        async def run(self, task: Task, **_: object) -> object:
+            """Record the persisted state and return success."""
+            stored = await self._store.get(task.id)
+            assert stored is not None
+            seen.append(stored.state)
+
+            class _Outcome:
+                """Minimal stand-in for a successful task run outcome."""
+
+                status = "ok"
+                error = None
+
+            return _Outcome()
+
+    store = TaskStore(tmp_path)
+    sched = TaskScheduler(
+        store=store,
+        runner=_StateObservingRunner(store),  # type: ignore[arg-type]
+        cfg=_cfg(),
+        glog=logging.getLogger("test"),
+        is_allowed=cfg_is_allowed(_cfg()),
+        tick_interval=60,
+        now_fn=lambda: NOW,
+    )
+    t = _once_task()
+    await store.add(t)
+
+    await _drain(sched)
+
+    assert seen == ["running"]
+
+
 async def test_running_ids_tracked_during_run(tmp_path: Path) -> None:
     """The shared running_ids set holds a task's id mid-run, then clears it."""
     shared: set[str] = set()
@@ -144,7 +189,7 @@ async def test_running_ids_tracked_during_run(tmp_path: Path) -> None:
     class _ObservingRunner:
         """Runner that records whether its task was marked running mid-run."""
 
-        async def run(self, task: Task) -> object:
+        async def run(self, task: Task, **_: object) -> object:
             """Observe the shared set during the run and return success."""
             seen_mid.append(task.id in shared)
 
@@ -182,6 +227,67 @@ async def test_interval_task_reschedules(tmp_path: Path) -> None:
     assert stored.next_run_at == NOW + timedelta(minutes=30)
 
 
+async def test_oneshot_error_completes_disabled(tmp_path: Path) -> None:
+    """A failed one-shot settles as completed, disabled, with error metadata."""
+
+    class _ErrorRunner:
+        """Runner that returns an error outcome."""
+
+        async def run(self, _task: Task, **_: object) -> object:
+            """Return an error outcome without raising."""
+            class _Outcome:
+                """Minimal stand-in for a failed task run outcome."""
+
+                status = "error"
+                error = "boom"
+
+            return _Outcome()
+
+    sched, store = _sched(tmp_path, _ErrorRunner(), _cfg())  # type: ignore[arg-type]
+    t = _once_task()
+    await store.add(t)
+
+    await _drain(sched)
+
+    stored = await store.get(t.id)
+    assert stored is not None
+    assert stored.state == "completed"
+    assert stored.enabled is False
+    assert stored.last_status == "error"
+    assert stored.last_error == "boom"
+
+
+async def test_recurring_error_keeps_future_next_run(tmp_path: Path) -> None:
+    """A failed recurring run keeps the advanced future schedule."""
+
+    class _ErrorRunner:
+        """Runner that returns an error outcome."""
+
+        async def run(self, _task: Task, **_: object) -> object:
+            """Return an error outcome without raising."""
+            class _Outcome:
+                """Minimal stand-in for a failed task run outcome."""
+
+                status = "error"
+                error = "boom"
+
+            return _Outcome()
+
+    sched, store = _sched(tmp_path, _ErrorRunner(), _cfg())  # type: ignore[arg-type]
+    t = _interval_task()
+    await store.add(t)
+
+    await _drain(sched)
+
+    stored = await store.get(t.id)
+    assert stored is not None
+    assert stored.state == "error"
+    assert stored.enabled is True
+    assert stored.last_status == "error"
+    assert stored.last_error == "boom"
+    assert stored.next_run_at == NOW + timedelta(minutes=30)
+
+
 async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
     """A task whose owner lost access is paused without running."""
     runner = _RecordingRunner()
@@ -197,6 +303,8 @@ async def test_revoked_owner_pauses_task(tmp_path: Path) -> None:
     assert stored.enabled is False
     assert stored.state == "paused"
     assert stored.last_error == "access_revoked"
+    events = await store.list_audit_events(t.id)
+    assert [e.event for e in events] == ["access_revoked"]
 
 
 async def test_no_double_fire_within_tick(tmp_path: Path) -> None:
@@ -251,6 +359,8 @@ async def test_stale_oneshot_completes_without_running(tmp_path: Path) -> None:
     stored = await store.get(t.id)
     assert stored is not None
     assert stored.state == "completed"
+    events = await store.list_audit_events(t.id)
+    assert [e.event for e in events] == ["completed_stale"]
 
 
 async def test_recent_oneshot_runs(tmp_path: Path) -> None:
@@ -294,6 +404,8 @@ async def test_stale_interval_fast_forwards_without_running(tmp_path: Path) -> N
     assert stored is not None
     assert stored.next_run_at is not None
     assert stored.next_run_at > NOW
+    events = await store.list_audit_events(t.id)
+    assert [e.event for e in events] == ["skipped_stale"]
 
 
 async def test_recent_interval_runs_once(tmp_path: Path) -> None:
@@ -314,6 +426,76 @@ async def test_recent_interval_runs_once(tmp_path: Path) -> None:
     await _drain(sched)
 
     assert runner.ran == [t.id]
+
+
+async def test_recovery_marks_stale_running_oneshot_error(tmp_path: Path) -> None:
+    """Startup recovery turns a stale persisted running one-shot into an error."""
+    sched, store = _sched(tmp_path, _RecordingRunner(), _cfg())
+    t = _once_task().model_copy(
+        update={"state": "running", "enabled": True, "next_run_at": None}
+    )
+    await store.add(t)
+
+    await sched._recover_interrupted_running()
+
+    stored = await store.get(t.id)
+    assert stored is not None
+    assert stored.state == "error"
+    assert stored.enabled is False
+    assert stored.next_run_at is None
+    assert stored.last_status == "error"
+    assert stored.last_error == "interrupted_by_restart"
+
+
+async def test_recovery_keeps_recurring_with_future_next_run_enabled(
+    tmp_path: Path,
+) -> None:
+    """Startup recovery keeps a recurring interrupted task enabled for a future slot."""
+    sched, store = _sched(tmp_path, _RecordingRunner(), _cfg())
+    future = NOW + timedelta(minutes=30)
+    t = _interval_task().model_copy(
+        update={"state": "running", "enabled": True, "next_run_at": future}
+    )
+    await store.add(t)
+
+    await sched._recover_interrupted_running()
+
+    stored = await store.get(t.id)
+    assert stored is not None
+    assert stored.state == "error"
+    assert stored.enabled is True
+    assert stored.next_run_at == future
+    assert stored.last_error == "interrupted_by_restart"
+
+
+async def test_recovery_skips_current_inflight_running_task(
+    tmp_path: Path,
+) -> None:
+    """Startup recovery does not change ids already running in this process."""
+    task_id = "abcdef123456"
+    shared = {task_id}
+    sched, store = _sched(
+        tmp_path,
+        _RecordingRunner(),
+        _cfg(),
+        running_ids=shared,
+    )
+    t = _once_task().model_copy(
+        update={
+            "id": task_id,
+            "state": "running",
+            "enabled": True,
+            "next_run_at": None,
+        }
+    )
+    await store.add(t)
+
+    await sched._recover_interrupted_running()
+
+    stored = await store.get(t.id)
+    assert stored is not None
+    assert stored.state == "running"
+    assert stored.enabled is True
 
 
 # --- heartbeat + loop-death watchdog -----------------------------------------

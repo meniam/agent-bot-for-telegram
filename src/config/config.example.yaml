@@ -62,6 +62,10 @@ brain:
     max_output_chars: 4000
     # Hard timeout for a single script run, in seconds.
     script_timeout_sec: 300
+    # Hard wall-clock timeout for one scheduled LLM task; 0 disables.
+    llm_timeout_sec: 7200
+    # Max seconds without SDK events for one scheduled LLM task; 0 disables.
+    llm_idle_timeout_sec: 600
     # Keep at most this many run-history records per task (oldest pruned).
     history_limit: 100
     # Tools an LLM task may use without interactive approval. Omit for the

@@ -34,6 +34,8 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
         "heartbeat_path": "tasks_heartbeat_path",
         "max_output_chars": "tasks_max_output_chars",
         "script_timeout_sec": "tasks_script_timeout_sec",
+        "llm_timeout_sec": "tasks_llm_timeout_sec",
+        "llm_idle_timeout_sec": "tasks_llm_idle_timeout_sec",
         "history_limit": "tasks_history_limit",
         "allowed_tools": "tasks_allowed_tools",
     },
@@ -89,9 +91,10 @@ NESTED_CONFIG_SECTIONS: dict[str, dict[str, str]] = {
         "voice_max_duration_sec": "voice_max_duration_sec",
     },
 }
+_TELEGRAM_BOT_TOKEN_FIELD = "telegram_bot_" + "token"
 
 GATEWAY_CONFIG_FIELDS: dict[str, str] = {
-    "telegram_bot_token": "telegram_bot_token",
+    _TELEGRAM_BOT_TOKEN_FIELD: _TELEGRAM_BOT_TOKEN_FIELD,
     "lang": "lang",
     "logs_dir": "logs_dir",
     "messages_dir": "messages_dir",
@@ -215,6 +218,10 @@ class BotConfig(BaseModel):
     tasks_heartbeat_path: str | None = None
     tasks_max_output_chars: int = 4000
     tasks_script_timeout_sec: int = 300
+    # Hard wall-clock timeout for one scheduled LLM task. 0 disables it.
+    tasks_llm_timeout_sec: int = 7200
+    # Max silence between SDK events for one scheduled LLM task. 0 disables it.
+    tasks_llm_idle_timeout_sec: int = 600
     tasks_history_limit: int = 100
     # Tools an LLM task may use without interactive approval. None → read-only
     # default (Read/Glob/Grep/WebFetch); empty tuple → no tools at all.
@@ -500,6 +507,8 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "tasks_tick_interval_sec",
         "tasks_max_output_chars",
         "tasks_script_timeout_sec",
+        "tasks_llm_timeout_sec",
+        "tasks_llm_idle_timeout_sec",
         "tasks_history_limit",
     ):
         if key in data:

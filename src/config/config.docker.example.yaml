@@ -47,6 +47,8 @@ brain:
     heartbeat_path: /app/var/scheduler_heartbeat
     max_output_chars: 4000
     script_timeout_sec: 300
+    llm_timeout_sec: 7200
+    llm_idle_timeout_sec: 600
     history_limit: 100
     allowed_tools: [Read, Glob, Grep, WebFetch]
 
