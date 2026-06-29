@@ -128,10 +128,10 @@ def _parse_correct_options(
     option_count: int,
     kind: object,
 ) -> tuple[int, ...] | None:
-    """Validate optional zero-based correct option indices for native quizzes."""
+    """Validate required zero-based correct option indices for native quizzes."""
     raw_correct = raw_q.get("correct_options", raw_q.get("correct_option_ids"))
     if raw_correct is None:
-        return ()
+        return None
     if not isinstance(raw_correct, list) or not raw_correct:
         return None
     correct: list[int] = []
@@ -408,7 +408,6 @@ def _poll_payload(
 ) -> dict[str, Any]:
     """Build kwargs for ``Message.answer_poll`` for one questionnaire item."""
     question = questionnaire.questions[index]
-    is_quiz = bool(question.correct_options)
     payload: dict[str, Any] = {
         "question": _clip(
             t.t(
@@ -421,13 +420,12 @@ def _poll_payload(
         ),
         "options": [_clip(option, 100) for option in question.options],
         "is_anonymous": False,
-        "type": "quiz" if is_quiz else "regular",
+        "type": "quiz",
         "allows_multiple_answers": question.kind == "multi_select",
         "allows_revoting": False,
         "shuffle_options": False,
+        "correct_option_ids": list(question.correct_options),
     }
-    if is_quiz:
-        payload["correct_option_ids"] = list(question.correct_options)
     return payload
 
 

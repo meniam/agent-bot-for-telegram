@@ -54,11 +54,16 @@ Rules for `bot_questionnaire`:
 - `questions` must contain 1 to 5 questions.
 - `kind` must be `single_select`, `multi_select`, or `text`.
 - `single_select` and `multi_select` must include 2 to 8 concise `options`.
+- `single_select` and `multi_select` must include `correct_options` as
+  zero-based option indices because Telegram renders them as native Quiz
+  messages, never regular polls.
+- `single_select` must include exactly one correct index; `multi_select` may
+  include several.
 - `text` must not include `options`.
-- For quiz-style questions, prefer 3 to 4 options and include
-  `correct_options` as zero-based option indices. `single_select` must include
-  exactly one correct index; `multi_select` may include several.
-- For preference/survey questions with no right answer, omit `correct_options`.
+- For quiz-style questions, prefer 3 to 4 options.
+- For preference/survey questions, choose the best/most likely answer when
+  using `single_select`/`multi_select`, or use `text` for genuinely open-ended
+  answers.
 - Keep every `question` short enough for Telegram.
 - Use the user's language for all visible question text and options.
 

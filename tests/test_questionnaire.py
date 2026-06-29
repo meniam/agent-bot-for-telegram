@@ -20,7 +20,8 @@ def test_parse_fenced_questionnaire() -> None:
     {
       "kind": "single_select",
       "question": "Pick one",
-      "options": ["A", "B"]
+      "options": ["A", "B"],
+      "correct_options": [0]
     },
     {
       "kind": "text",
@@ -48,7 +49,8 @@ def test_parse_raw_json_questionnaire() -> None:
     {
       "kind": "multi_select",
       "question": "Pick many",
-      "options": ["A", "B", "C"]
+      "options": ["A", "B", "C"],
+      "correct_options": [0, 2]
     }
   ]
 }
@@ -58,6 +60,25 @@ def test_parse_raw_json_questionnaire() -> None:
 
     assert questionnaire is not None
     assert questionnaire.questions[0].kind == "multi_select"
+    assert questionnaire.questions[0].correct_options == (0, 2)
+
+
+def test_parse_rejects_select_question_without_correct_options() -> None:
+    """Select questions must be native quizzes with explicit correct answers."""
+    payload = """
+{
+  "type": "questionnaire",
+  "questions": [
+    {
+      "kind": "single_select",
+      "question": "Pick one",
+      "options": ["A", "B"]
+    }
+  ]
+}
+"""
+
+    assert parse_questionnaire(payload) is None
 
 
 def test_parse_accepts_zero_based_correct_options() -> None:
@@ -192,20 +213,21 @@ def test_poll_payload_uses_quiz_when_correct_options_exist() -> None:
     assert payload["allows_revoting"] is False
 
 
-def test_poll_payload_uses_regular_poll_without_correct_options() -> None:
-    """Native poll rendering avoids quiz mode when there is no right answer."""
+def test_poll_payload_always_uses_quiz() -> None:
+    """Native poll rendering always uses Telegram quiz mode for select questions."""
     questionnaire = Questionnaire(
         questions=(
             Question(
                 kind="multi_select",
                 question="Pick many",
                 options=("First", "Second"),
+                correct_options=(0,),
             ),
         ),
     )
 
     payload = _poll_payload(Translator("en"), questionnaire, 0)
 
-    assert payload["type"] == "regular"
-    assert "correct_option_ids" not in payload
+    assert payload["type"] == "quiz"
+    assert payload["correct_option_ids"] == [0]
     assert payload["allows_multiple_answers"] is True
