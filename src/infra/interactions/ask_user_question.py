@@ -128,35 +128,38 @@ async def _ask_one(
     prefix = f"❓ [{qidx + 1}/{qtotal}]"
     if header:
         prefix = f"{prefix} {header}"
-    body_lines = [prefix, str(text).strip()]
-    if multi:
-        body_lines.append("")
-        body_lines.append(t.t("aq_pick_multi"))
-    body = "\n".join(line for line in body_lines if line is not None)
+    def build_text() -> str:
+        """Build the visible question body with full option labels."""
+        session = gate._aq.get(request_id)
+        selected: set[int] = session.selected if session is not None else set()
+        body_lines = [
+            prefix,
+            str(text).strip(),
+            "",
+            *_option_lines(options, selected if multi else set()),
+        ]
+        if multi:
+            body_lines.append(t.t("aq_pick_multi"))
+        return "\n".join(line for line in body_lines if line is not None)
 
-    # Build keyboard with current selection state. Recreated on each
-    # callback so the checkmarks redraw without keeping state in the
-    # closure.
+    # Build a compact numeric keyboard. Full option text lives in the message
+    # body so long labels wrap normally instead of being squeezed into buttons.
     def build_kb() -> InlineKeyboardMarkup:
         """Build the options keyboard, redrawing checkmarks from current selection."""
         session = gate._aq.get(request_id)
         selected: set[int] = session.selected if session is not None else set()
         rows: list[list[InlineKeyboardButton]] = []
+        option_buttons: list[InlineKeyboardButton] = []
         for i, opt in enumerate(options):
-            if not isinstance(opt, dict):
-                continue
-            label = str(opt.get("label", f"option {i + 1}"))
-            if multi:
-                mark = "☑️ " if i in selected else "▫️ "
-                label = f"{mark}{label}"
-            rows.append(
-                [
+            if isinstance(opt, dict):
+                label = f"✓ {i + 1}" if i in selected else str(i + 1)
+                option_buttons.append(
                     InlineKeyboardButton(
-                        text=label[:64],
+                        text=label,
                         callback_data=f"aq:{request_id}:{i}",
                     )
-                ]
-            )
+                )
+        rows.extend(_button_rows(option_buttons))
         footer: list[InlineKeyboardButton] = []
         if multi:
             footer.append(
@@ -175,7 +178,7 @@ async def _ask_one(
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     sent = await gate._bot.send_message(
-        chat_id, body, reply_markup=build_kb(), parse_mode=None
+        chat_id, build_text(), reply_markup=build_kb(), parse_mode=None
     )
 
     gate._aq[request_id] = _AQSession(
@@ -185,6 +188,7 @@ async def _ask_one(
         chat_id=chat_id,
         message_id=sent.message_id,
         build_kb=build_kb,
+        build_text=build_text,
     )
 
     try:
@@ -198,6 +202,26 @@ async def _ask_one(
     return [
         str(options[i].get("label", "")) for i in picked_idx if 0 <= i < len(options)
     ]
+
+
+def _option_lines(options: list[Any], selected: set[int]) -> list[str]:
+    """Render full option labels as numbered message-body lines."""
+    lines: list[str] = []
+    for i, opt in enumerate(options):
+        if not isinstance(opt, dict):
+            continue
+        label = str(opt.get("label", f"option {i + 1}")).strip()
+        prefix = f"{i + 1}."
+        if i in selected:
+            prefix = f"✓ {prefix}"
+        lines.append(f"{prefix} {label}")
+    return lines
+
+
+def _button_rows(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButton]]:
+    """Split compact option buttons into Telegram keyboard rows."""
+    width = 4
+    return [buttons[i : i + width] for i in range(0, len(buttons), width)]
 
 
 async def on_callback(
@@ -284,10 +308,12 @@ async def on_callback(
     else:
         session.selected.add(idx)
     try:
-        await gate._bot.edit_message_reply_markup(
+        await gate._bot.edit_message_text(
             chat_id=session.chat_id,
             message_id=session.message_id,
+            text=session.build_text(),
             reply_markup=session.build_kb(),
+            parse_mode=None,
         )
     except Exception:
         log.debug("could not redraw AskUserQuestion keyboard", exc_info=True)

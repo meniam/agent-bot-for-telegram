@@ -35,6 +35,7 @@ class _AQSession:
 
     __slots__ = (
         "build_kb",
+        "build_text",
         "chat_id",
         "fut",
         "message_id",
@@ -51,8 +52,9 @@ class _AQSession:
         chat_id: int,
         message_id: int,
         build_kb: Callable[[], InlineKeyboardMarkup],
+        build_text: Callable[[], str],
     ) -> None:
-        """Capture the future, options, selection state, and keyboard builder."""
+        """Capture the future, options, selection state, and render builders."""
         self.fut = fut
         self.options: list[dict[str, Any]] = options
         self.selected: set[int] = set()
@@ -60,6 +62,7 @@ class _AQSession:
         self.chat_id = chat_id
         self.message_id = message_id
         self.build_kb = build_kb
+        self.build_text = build_text
 
 
 class TelegramInteractionGate:

@@ -1,6 +1,13 @@
-"""Questionnaire parsing: fenced and raw JSON payloads, validation."""
+"""Questionnaire parsing and compact Telegram UI rendering."""
 
-from src.ui.questionnaire import parse_questionnaire
+from src.i18n import Translator
+from src.ui.questionnaire import (
+    Question,
+    Questionnaire,
+    _keyboard,
+    _question_text,
+    parse_questionnaire,
+)
 
 
 def test_parse_fenced_questionnaire() -> None:
@@ -73,3 +80,50 @@ def test_parse_rejects_text_question_with_options() -> None:
 """
 
     assert parse_questionnaire(payload) is None
+
+
+def test_long_options_render_in_message_text_not_buttons() -> None:
+    """Long option labels move to message text while buttons stay compact."""
+    long_option = "A very long answer that would not fit inside a Telegram button"
+    questionnaire = Questionnaire(
+        questions=(
+            Question(
+                kind="single_select",
+                question="Pick one",
+                options=(long_option, "Short"),
+            ),
+        ),
+    )
+    tr = Translator("en")
+
+    text = _question_text(tr, questionnaire, 0)
+    keyboard = _keyboard("token", questionnaire, 0, {}, tr)
+
+    assert long_option in text
+    button_texts = [
+        button.text
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+    assert long_option not in button_texts
+    assert button_texts[:2] == ["1", "2"]
+
+
+def test_selected_option_is_marked_in_text_and_button() -> None:
+    """A selected answer gets a compact marker in both visible places."""
+    questionnaire = Questionnaire(
+        questions=(
+            Question(
+                kind="multi_select",
+                question="Pick many",
+                options=("First", "Second"),
+            ),
+        ),
+    )
+    tr = Translator("en")
+
+    text = _question_text(tr, questionnaire, 0, {1})
+    keyboard = _keyboard("token", questionnaire, 0, {0: {1}}, tr)
+
+    assert "✓ 2. Second" in text
+    assert keyboard.inline_keyboard[0][1].text == "✓ 2"

@@ -122,7 +122,7 @@ async def render_questionnaire(
     """Send the first question and register a live session keyed by a token."""
     token = secrets.token_hex(5)
     sent = await message.answer(
-        _question_text(t, questionnaire, 0),
+        _question_text(t, questionnaire, 0, set()),
         reply_markup=_keyboard(token, questionnaire, 0, {}, t),
         parse_mode=None,
     )
@@ -220,7 +220,12 @@ async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
         await callback.bot.edit_message_text(
             chat_id=session.chat_id,
             message_id=session.message_id,
-            text=_question_text(t, session.questionnaire, session.current_index),
+            text=_question_text(
+                t,
+                session.questionnaire,
+                session.current_index,
+                session.selected.get(session.current_index, set()),
+            ),
             reply_markup=_keyboard(
                 token,
                 session.questionnaire,
@@ -236,16 +241,52 @@ async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
     return None
 
 
-def _question_text(t: Translator, questionnaire: Questionnaire, index: int) -> str:
-    """Format the prompt line for the question at `index` (1-based display)."""
+def _question_text(
+    t: Translator,
+    questionnaire: Questionnaire,
+    index: int,
+    selected: set[int] | None = None,
+) -> str:
+    """Format a question with full option text in the message body."""
     total = len(questionnaire.questions)
     question = questionnaire.questions[index]
-    return t.t(
-        "questionnaire_question",
-        index=index + 1,
-        total=total,
-        question=question.question,
-    )
+    lines = [
+        t.t(
+            "questionnaire_question",
+            index=index + 1,
+            total=total,
+            question=question.question,
+        )
+    ]
+    option_lines = _option_lines(question, selected or set())
+    if option_lines:
+        lines.append("")
+        lines.extend(option_lines)
+    return "\n".join(lines)
+
+
+def _option_lines(question: Question, selected: set[int]) -> list[str]:
+    """Render full option labels as numbered message-body lines."""
+    lines: list[str] = []
+    for opt_idx, option in enumerate(question.options):
+        prefix = f"{opt_idx + 1}."
+        if opt_idx in selected:
+            prefix = f"✓ {prefix}"
+        lines.append(f"{prefix} {option}")
+    return lines
+
+
+def _option_button_text(opt_idx: int, selected: set[int]) -> str:
+    """Return a compact button label for one option number."""
+    if opt_idx in selected:
+        return f"✓ {opt_idx + 1}"
+    return str(opt_idx + 1)
+
+
+def _button_rows(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButton]]:
+    """Split compact option buttons into Telegram keyboard rows."""
+    width = 4
+    return [buttons[i : i + width] for i in range(0, len(buttons), width)]
 
 
 def _keyboard(
@@ -258,16 +299,16 @@ def _keyboard(
     """Build the option, navigation, and done buttons for the current question."""
     question = questionnaire.questions[index]
     rows: list[list[InlineKeyboardButton]] = []
-    for opt_idx, option in enumerate(question.options):
-        prefix = "✓ " if opt_idx in selected.get(index, set()) else ""
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{prefix}{option}"[:64],
-                    callback_data=f"qq:{token}:opt:{opt_idx}",
-                )
-            ]
+    option_buttons: list[InlineKeyboardButton] = []
+    selected_for_question = selected.get(index, set())
+    for opt_idx, _option in enumerate(question.options):
+        option_buttons.append(
+            InlineKeyboardButton(
+                text=_option_button_text(opt_idx, selected_for_question),
+                callback_data=f"qq:{token}:opt:{opt_idx}",
+            )
         )
+    rows.extend(_button_rows(option_buttons))
 
     nav: list[InlineKeyboardButton] = []
     if index > 0:
