@@ -224,6 +224,8 @@
   "task_state_scheduled": "🟢 active",
   "task_state_paused": "⏸ paused",
   "task_state_error": "⚠️ error",
+  "task_state_running": "🔄 running",
+  "task_legend": "Statuses: 🔄 running — executing right now · 🟢 active — waiting to run on schedule · ⏸ paused — suspended, won't run · ⚠️ error — last run failed · ✅ completed — one-shot finished (hidden from this list)",
   "bot_command_tasks": "List active tasks",
   "bot_command_task": "Scheduled tasks",
   "help_example_tasks": "shows active tasks as a table (archived excluded)",

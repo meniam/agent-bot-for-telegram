@@ -53,12 +53,15 @@ class TaskScheduler:
         now_fn: Callable[[], datetime] | None = None,
         heartbeat_path: Path | None = None,
         on_loop_death: Callable[[BaseException], Awaitable[None]] | None = None,
+        running_ids: set[str] | None = None,
     ) -> None:
         """Wire the scheduler to its store, runner, config, and access check.
 
         ``heartbeat_path`` (optional) is rewritten after every loop pass for
         liveness checks. ``on_loop_death`` (optional) is awaited if the loop
         ends unexpectedly (crash or external cancel — not via ``stop()``).
+        ``running_ids`` (optional) is a shared set the scheduler keeps in sync
+        with the ids of tasks running right now, so the UI can show a live state.
         """
         self._store = store
         self._runner = runner
@@ -69,7 +72,7 @@ class TaskScheduler:
         self._now = now_fn or (lambda: datetime.now().astimezone())
         self._heartbeat_path = heartbeat_path
         self._on_loop_death = on_loop_death
-        self._running: set[str] = set()
+        self._running: set[str] = running_ids if running_ids is not None else set()
         self._inflight: set[asyncio.Task[None]] = set()
         self._loop_task: asyncio.Task[None] | None = None
         # Set by stop() so the done-callback can tell an intentional shutdown

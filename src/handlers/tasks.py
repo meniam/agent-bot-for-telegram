@@ -69,11 +69,17 @@ def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
     for t in tasks:
         name = t.name or (t.prompt or t.script or t.id)[:24]
         nxt = t.next_run_at.strftime("%d.%m %H:%M") if t.next_run_at else "—"
-        status = state_label.get(t.state, t.state)
+        # A task running right now (tracked live by the scheduler) overrides its
+        # persisted state, which is still "scheduled" mid-run.
+        if t.id in ctx.running_task_ids:
+            status = tr.t("task_state_running")
+        else:
+            status = state_label.get(t.state, t.state)
         rows.append(
             f"| {_cell(name)} | {_cell(t.schedule.display)} | {nxt} | {status} |"
         )
-    return f"{tr.t('task_table_title')}\n\n{head}\n" + "\n".join(rows)
+    table = f"{tr.t('task_table_title')}\n\n{head}\n" + "\n".join(rows)
+    return f"{table}\n\n{tr.t('task_legend')}"
 
 
 async def tasks_cmd(

@@ -63,3 +63,6 @@ class BotContext:
     # Chats already told "busy" while a turn runs; deduped so queued messages
     # get one notice, not one per message. Mutated in place (frozen-safe).
     busy_notified: set[int] = field(default_factory=set)
+    # Ids of scheduled tasks running right now, kept in sync by the scheduler so
+    # `/tasks` can show a live "running" state. Mutated in place (frozen-safe).
+    running_task_ids: set[str] = field(default_factory=set)

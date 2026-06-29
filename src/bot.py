@@ -307,6 +307,10 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         tr, commands, tasks_enabled=cfg.tasks_enabled
     )
 
+    # Shared with the scheduler: ids of tasks running right now, so `/tasks`
+    # can render a live "running" state (the scheduler mutates this set).
+    running_task_ids: set[str] = set()
+
     ctx = BotContext(
         cfg=cfg,
         bot=bot,
@@ -327,6 +331,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         is_allowed=is_allowed,
         tasks=tasks,
         task_service=task_service,
+        running_task_ids=running_task_ids,
     )
 
     dp = Dispatcher()
@@ -368,6 +373,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             tick_interval=cfg.tasks_tick_interval_sec,
             heartbeat_path=heartbeat_path,
             on_loop_death=_alert_loop_death,
+            running_ids=running_task_ids,
         )
         scheduler.start()
 

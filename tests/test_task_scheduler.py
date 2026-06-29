@@ -136,6 +136,36 @@ async def test_once_task_completes_and_persists(tmp_path: Path) -> None:
     assert stored.next_run_at is None
 
 
+async def test_running_ids_tracked_during_run(tmp_path: Path) -> None:
+    """The shared running_ids set holds a task's id mid-run, then clears it."""
+    shared: set[str] = set()
+    seen_mid: list[bool] = []
+
+    class _ObservingRunner:
+        """Runner that records whether its task was marked running mid-run."""
+
+        async def run(self, task: Task) -> object:
+            """Observe the shared set during the run and return success."""
+            seen_mid.append(task.id in shared)
+
+            class _Outcome:
+                status = "ok"
+                error = None
+
+            return _Outcome()
+
+    sched, store = _sched(
+        tmp_path, _ObservingRunner(), _cfg(), running_ids=shared  # type: ignore[arg-type]
+    )
+    t = _once_task()
+    await store.add(t)
+
+    await _drain(sched)
+
+    assert seen_mid == [True]  # id present in the shared set while running
+    assert shared == set()  # discarded once the run finished
+
+
 async def test_interval_task_reschedules(tmp_path: Path) -> None:
     """An interval task runs once and reschedules its next run."""
     runner = _RecordingRunner()
