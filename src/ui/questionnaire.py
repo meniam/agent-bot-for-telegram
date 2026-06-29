@@ -7,13 +7,14 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    PollAnswer,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ _FENCE_RE = re.compile(
     re.DOTALL,
 )
 _QUESTIONNAIRES: dict[str, QuestionnaireSession] = {}
+_POLL_QUESTIONNAIRES: dict[str, PollQuestionnaireSession] = {}
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +39,7 @@ class Question:
     kind: QuestionKind
     question: str
     options: tuple[str, ...] = ()
+    correct_options: tuple[int, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,6 +58,19 @@ class QuestionnaireSession:
     message_id: int
     current_index: int = 0
     selected: dict[int, set[int]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PollQuestionnaireSession:
+    """Live state for a questionnaire rendered as native Telegram polls."""
+
+    questionnaire: Questionnaire
+    chat_id: int
+    user_id: int | None
+    poll_to_question: dict[str, int] = field(default_factory=dict)
+    poll_message_ids: dict[str, int] = field(default_factory=dict)
+    selected: dict[int, set[int]] = field(default_factory=dict)
+    finalized: bool = False
 
 
 def parse_questionnaire(text: str) -> Questionnaire | None:
@@ -93,14 +109,42 @@ def parse_questionnaire(text: str) -> Questionnaire | None:
         clean_options = tuple(str(opt).strip() for opt in options if str(opt).strip())
         if len(clean_options) != len(options):
             return None
+        correct_options = _parse_correct_options(raw_q, len(clean_options), kind)
+        if correct_options is None:
+            return None
         questions.append(
             Question(
                 kind=kind,
                 question=question.strip(),
                 options=clean_options,
+                correct_options=correct_options,
             )
         )
     return Questionnaire(questions=tuple(questions))
+
+
+def _parse_correct_options(
+    raw_q: dict[str, Any],
+    option_count: int,
+    kind: object,
+) -> tuple[int, ...] | None:
+    """Validate optional zero-based correct option indices for native quizzes."""
+    raw_correct = raw_q.get("correct_options", raw_q.get("correct_option_ids"))
+    if raw_correct is None:
+        return ()
+    if not isinstance(raw_correct, list) or not raw_correct:
+        return None
+    correct: list[int] = []
+    for raw_idx in raw_correct:
+        if not isinstance(raw_idx, int):
+            return None
+        if raw_idx < 0 or raw_idx >= option_count:
+            return None
+        correct.append(raw_idx)
+    unique = tuple(sorted(set(correct)))
+    if kind == "single_select" and len(unique) != 1:
+        return None
+    return unique
 
 
 def _extract_payload(text: str) -> str | None:
@@ -119,7 +163,46 @@ async def render_questionnaire(
     questionnaire: Questionnaire,
     t: Translator,
 ) -> None:
-    """Send the first question and register a live session keyed by a token."""
+    """Render a questionnaire as native polls when possible, else inline UI."""
+    if _can_render_as_polls(questionnaire):
+        await _render_poll_questionnaire(message, questionnaire, t)
+        return
+    await _render_inline_questionnaire(message, questionnaire, t)
+
+
+def _can_render_as_polls(questionnaire: Questionnaire) -> bool:
+    """Return whether every question can be represented as a native poll."""
+    return all(question.kind != "text" for question in questionnaire.questions)
+
+
+async def _render_poll_questionnaire(
+    message: Message,
+    questionnaire: Questionnaire,
+    t: Translator,
+) -> None:
+    """Send every select question as a native Telegram poll or quiz."""
+    user_id = message.from_user.id if message.from_user is not None else None
+    session = PollQuestionnaireSession(
+        questionnaire=questionnaire,
+        chat_id=message.chat.id,
+        user_id=user_id,
+    )
+    for index, _question in enumerate(questionnaire.questions):
+        payload = _poll_payload(t, questionnaire, index)
+        sent = await message.answer_poll(**payload)
+        if sent.poll is None:
+            continue
+        session.poll_to_question[sent.poll.id] = index
+        session.poll_message_ids[sent.poll.id] = sent.message_id
+        _POLL_QUESTIONNAIRES[sent.poll.id] = session
+
+
+async def _render_inline_questionnaire(
+    message: Message,
+    questionnaire: Questionnaire,
+    t: Translator,
+) -> None:
+    """Send the first inline question and register a live session keyed by a token."""
     token = secrets.token_hex(5)
     sent = await message.answer(
         _question_text(t, questionnaire, 0, set()),
@@ -241,6 +324,35 @@ async def on_callback(callback: CallbackQuery, t: Translator) -> str | None:
     return None
 
 
+async def on_poll_answer(
+    poll_answer: PollAnswer,
+    t: Translator,
+) -> tuple[int, str, str, list[int]] | None:
+    """Handle a native poll answer; return chat, summary, prompt, and poll messages."""
+    session = _POLL_QUESTIONNAIRES.get(poll_answer.poll_id)
+    if session is None or session.finalized:
+        return None
+    user = poll_answer.user
+    if session.user_id is not None and (user is None or user.id != session.user_id):
+        return None
+    question_index = session.poll_to_question.get(poll_answer.poll_id)
+    if question_index is None:
+        return None
+    session.selected[question_index] = set(poll_answer.option_ids)
+    if _missing_answers(session):
+        return None
+
+    session.finalized = True
+    for poll_id in session.poll_to_question:
+        _POLL_QUESTIONNAIRES.pop(poll_id, None)
+    return (
+        session.chat_id,
+        _summary_text(t, session),
+        _agent_summary_text(session),
+        list(session.poll_message_ids.values()),
+    )
+
+
 def _question_text(
     t: Translator,
     questionnaire: Questionnaire,
@@ -287,6 +399,44 @@ def _button_rows(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboar
     """Split compact option buttons into Telegram keyboard rows."""
     width = 4
     return [buttons[i : i + width] for i in range(0, len(buttons), width)]
+
+
+def _poll_payload(
+    t: Translator,
+    questionnaire: Questionnaire,
+    index: int,
+) -> dict[str, Any]:
+    """Build kwargs for ``Message.answer_poll`` for one questionnaire item."""
+    question = questionnaire.questions[index]
+    is_quiz = bool(question.correct_options)
+    payload: dict[str, Any] = {
+        "question": _clip(
+            t.t(
+                "questionnaire_question",
+                index=index + 1,
+                total=len(questionnaire.questions),
+                question=question.question,
+            ),
+            300,
+        ),
+        "options": [_clip(option, 100) for option in question.options],
+        "is_anonymous": False,
+        "type": "quiz" if is_quiz else "regular",
+        "allows_multiple_answers": question.kind == "multi_select",
+        "allows_revoting": False,
+        "shuffle_options": False,
+    }
+    if is_quiz:
+        payload["correct_option_ids"] = list(question.correct_options)
+    return payload
+
+
+def _clip(text: str, limit: int) -> str:
+    """Trim Telegram poll text fields to their Bot API length limit."""
+    stripped = text.strip()
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _keyboard(
@@ -345,7 +495,7 @@ def _keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _missing_answers(session: QuestionnaireSession) -> list[int]:
+def _missing_answers(session: QuestionnaireSession | PollQuestionnaireSession) -> list[int]:
     """Return the 1-based indices of select questions with no selection yet."""
     missing: list[int] = []
     for idx, question in enumerate(session.questionnaire.questions):
@@ -356,7 +506,10 @@ def _missing_answers(session: QuestionnaireSession) -> list[int]:
     return missing
 
 
-def _summary_text(t: Translator, session: QuestionnaireSession) -> str:
+def _summary_text(
+    t: Translator,
+    session: QuestionnaireSession | PollQuestionnaireSession,
+) -> str:
     """Render the user-facing completion summary of selected answers."""
     lines = [t.t("questionnaire_done")]
     for idx, question in enumerate(session.questionnaire.questions):
@@ -380,7 +533,7 @@ def _summary_text(t: Translator, session: QuestionnaireSession) -> str:
     return "\n".join(lines)
 
 
-def _agent_summary_text(session: QuestionnaireSession) -> str:
+def _agent_summary_text(session: QuestionnaireSession | PollQuestionnaireSession) -> str:
     """Render the answers as a prompt fed back to the agent to continue."""
     lines = ["User completed the Telegram questionnaire:"]
     for idx, question in enumerate(session.questionnaire.questions):

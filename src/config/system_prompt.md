@@ -37,7 +37,8 @@ Use this schema:
     {
       "kind": "single_select",
       "question": "What should the user choose?",
-      "options": ["Option A", "Option B", "Option C"]
+      "options": ["Option A", "Option B", "Option C"],
+      "correct_options": [0]
     },
     {
       "kind": "text",
@@ -54,8 +55,10 @@ Rules for `bot_questionnaire`:
 - `kind` must be `single_select`, `multi_select`, or `text`.
 - `single_select` and `multi_select` must include 2 to 8 concise `options`.
 - `text` must not include `options`.
-- For quiz-style questions, prefer 3 to 4 options. Include exactly one best
-  answer unless the question is intentionally `multi_select`.
+- For quiz-style questions, prefer 3 to 4 options and include
+  `correct_options` as zero-based option indices. `single_select` must include
+  exactly one correct index; `multi_select` may include several.
+- For preference/survey questions with no right answer, omit `correct_options`.
 - Keep every `question` short enough for Telegram.
 - Use the user's language for all visible question text and options.
 

@@ -1,8 +1,10 @@
 """ACL middleware + `deny_access` helper.
 
 Replaces the 14 copies of `if not is_allowed(...): await deny_access(...)` in
-the old `bot.py`. Runs once per inbound message / callback, injects
-`chat_id` and `cl` (per-chat logger) into the handler's kwargs.
+the old `bot.py`. Runs once per inbound message / callback, injecting
+`chat_id` and `cl` (per-chat logger) into the handler's kwargs. Poll-answer
+updates carry no chat id, so they receive only `ctx`; their handlers must bind
+answers to a previously authorized chat/session.
 
 Gate-managed callbacks (`perm:`, `aq:`, `plan:`) bypass the allowlist —
 `TelegramInteractionGate` validates ownership itself.

@@ -5,6 +5,7 @@ from src.ui.questionnaire import (
     Question,
     Questionnaire,
     _keyboard,
+    _poll_payload,
     _question_text,
     parse_questionnaire,
 )
@@ -57,6 +58,47 @@ def test_parse_raw_json_questionnaire() -> None:
 
     assert questionnaire is not None
     assert questionnaire.questions[0].kind == "multi_select"
+
+
+def test_parse_accepts_zero_based_correct_options() -> None:
+    """Quiz metadata parses as zero-based correct option indices."""
+    payload = """
+{
+  "type": "questionnaire",
+  "questions": [
+    {
+      "kind": "single_select",
+      "question": "Pick one",
+      "options": ["A", "B", "C"],
+      "correct_options": [1]
+    }
+  ]
+}
+"""
+
+    questionnaire = parse_questionnaire(payload)
+
+    assert questionnaire is not None
+    assert questionnaire.questions[0].correct_options == (1,)
+
+
+def test_parse_rejects_invalid_correct_options() -> None:
+    """Quiz metadata must point at existing options."""
+    payload = """
+{
+  "type": "questionnaire",
+  "questions": [
+    {
+      "kind": "single_select",
+      "question": "Pick one",
+      "options": ["A", "B"],
+      "correct_options": [2]
+    }
+  ]
+}
+"""
+
+    assert parse_questionnaire(payload) is None
 
 
 def test_parse_ignores_normal_text() -> None:
@@ -127,3 +169,43 @@ def test_selected_option_is_marked_in_text_and_button() -> None:
 
     assert "✓ 2. Second" in text
     assert keyboard.inline_keyboard[0][1].text == "✓ 2"
+
+
+def test_poll_payload_uses_quiz_when_correct_options_exist() -> None:
+    """Native poll rendering uses Telegram quiz mode for graded questions."""
+    questionnaire = Questionnaire(
+        questions=(
+            Question(
+                kind="single_select",
+                question="Pick one",
+                options=("First", "Second"),
+                correct_options=(1,),
+            ),
+        ),
+    )
+
+    payload = _poll_payload(Translator("en"), questionnaire, 0)
+
+    assert payload["type"] == "quiz"
+    assert payload["correct_option_ids"] == [1]
+    assert payload["is_anonymous"] is False
+    assert payload["allows_revoting"] is False
+
+
+def test_poll_payload_uses_regular_poll_without_correct_options() -> None:
+    """Native poll rendering avoids quiz mode when there is no right answer."""
+    questionnaire = Questionnaire(
+        questions=(
+            Question(
+                kind="multi_select",
+                question="Pick many",
+                options=("First", "Second"),
+            ),
+        ),
+    )
+
+    payload = _poll_payload(Translator("en"), questionnaire, 0)
+
+    assert payload["type"] == "regular"
+    assert "correct_option_ids" not in payload
+    assert payload["allows_multiple_answers"] is True

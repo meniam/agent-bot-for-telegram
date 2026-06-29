@@ -366,6 +366,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     middleware = AclMiddleware(ctx)
     dp.message.outer_middleware(middleware)
     dp.callback_query.outer_middleware(middleware)
+    dp.poll_answer.outer_middleware(middleware)
     register_all(dp, commands)
 
     scheduler: TaskScheduler | None = None
