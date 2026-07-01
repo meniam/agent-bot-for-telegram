@@ -28,6 +28,10 @@ RUN npm install -g \
       @earendil-works/pi-coding-agent \
       @openai/codex
 
+# uv/uvx on PATH — MCP servers configured to run via `uvx` (e.g. postgres-mcp
+# in the vault's .mcp.json) shell out to it.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 WORKDIR /app
 
 # Install Python deps first for layer caching, then the editable package.
