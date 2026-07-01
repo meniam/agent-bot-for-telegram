@@ -14,10 +14,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_RETRIES=5 \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
-# Node 22 LTS + the few tools the agents shell out to (git for repo ops,
-# openssh-client so the bot/agent can ssh into other hosts via mounted keys).
+# Node 22 LTS + the tools the agents shell out to: git for repo ops,
+# openssh-client to ssh into other hosts via mounted keys, ripgrep/fd/jq/tree
+# for fast search & JSON handling, sqlite3 for local DB inspection,
+# poppler-utils/unzip/ffmpeg/imagemagick for PDF/archive/media uploads.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates gnupg git openssh-client \
+ && apt-get install -y --no-install-recommends \
+      curl ca-certificates gnupg git openssh-client \
+      ripgrep fd-find jq tree sqlite3 \
+      poppler-utils unzip ffmpeg imagemagick \
+ && ln -s /usr/bin/fdfind /usr/local/bin/fd \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
