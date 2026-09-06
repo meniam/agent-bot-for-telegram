@@ -2,7 +2,7 @@
 
 Decided: 2026-09-06
 Plan: —
-Revised: revised by [Старые планы переименованы в схему `YYYYMMDD_HHMM_name`](20260906_1310_old_plans_renamed_to_timestamp_scheme.md) 2026-09-06
+Revised: revised by [Старые планы переименованы в схему `YYYYMMDD_HHMM_name`](20260906_1310_old_plans_renamed_to_timestamp_scheme.md) 2026-09-06; revised by [Правила подключаются из корневого `AGENTS.md` папки с проектами, копия удалена](20260906_1848_rules_included_from_cluster_copy_removed.md) 2026-09-06
 
 ## Context
 

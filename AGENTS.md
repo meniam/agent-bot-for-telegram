@@ -16,19 +16,14 @@ before changing behavior.
 
 ## Rules and Journals
 
-Eugene's shared rules live as a **copy** in `.agents/rules/` (source:
-`~/.agents/rules`, updated by copying by hand, not a symlink: the repository is
-built into a Docker image and cloned on servers without that home directory).
-Index: `.agents/rules/AGENTS.md`. Journal rules are included here:
-
-@.agents/rules/decisions.md
-@.agents/rules/learning.md
-@.agents/rules/changelog.md
-
-`plans.md` is pulled in through `.agents/plans/AGENTS.md`. Read `db.md` before
-touching a schema. Python and Ruff conventions are not copied here: they are
-applied through `pyproject.toml` and `justfile`, and their source is
-`~/.agents/rules/python.md` and `~/.agents/rules/ruff.md` on Eugene's machine.
+Eugene's shared rules are included one level up, in the root
+[`../../AGENTS.md`](../../AGENTS.md) of the projects folder: journals (`plans.md`,
+`decisions.md`, `learning.md`, `changelog.md`) and database (`db.md`). This
+repository does not reference their location and keeps no copy
+([decision](.agents/decisions/20260906_1848_rules_included_from_cluster_copy_removed.md)); only
+project-specific notes live here. Read `db.md` before touching a schema.
+Python and Ruff conventions (`python.md`, `ruff.md`) are applied through
+`pyproject.toml` and `justfile`.
 
 Four journals, one question each. Every directory has its own `AGENTS.md` with
 project-specific notes. The record goes in the **same commit** as the change.
