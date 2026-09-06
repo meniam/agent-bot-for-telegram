@@ -295,6 +295,10 @@ class ClaudeAgentBackend(BaseAgentBackend):
         placeholder). We re-raise carrying the captured tail so the actual reason
         (e.g. the root ``--dangerously-skip-permissions`` guard) reaches the
         per-chat log instead of a generic "Check stderr output for details".
+
+        Raises:
+            ProcessError: The CLI failed to start; the message carries the
+                captured stderr tail.
         """
         self._stderr_tail.pop(chat_id, None)
         try:
@@ -315,6 +319,10 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         On a failed resume (missing/corrupt session) it mints a fresh session so
         the chat keeps working instead of erroring out.
+
+        Raises:
+            ProcessError: Starting a fresh session failed (a failed resume is
+                retried as a new session first).
         """
         self._ensure_gc_running()
         entry = self._clients.get(chat_id)
@@ -368,6 +376,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         Prefers streamed ``content_block_delta`` events; falls back to the final
         ``AssistantMessage`` text blocks when no delta was seen.
+
+        Yields:
+            Text and thinking chunks in arrival order.
         """
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
@@ -406,6 +417,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
         Called when the SDK emits no event for ``self._event_timeout`` seconds —
         e.g. a wedged MCP/web-fetch tool call during deep-research. Best-effort
         interrupts the live turn so the session is reusable, then always raises.
+
+        Raises:
+            AgentEventStreamTimeoutError: Always, after the interrupt attempt.
         """
         msg = (
             "Claude event stream timed out after "
@@ -513,6 +527,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         If it was current, drop the live client so the next turn resumes the new
         current session.
+
+        Returns:
+            The deleted session, or None when ``sid`` is unknown.
         """
         async with self._lock(chat_id):
             target = await self._store.get_by_id(chat_id, sid)
@@ -528,7 +545,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
         Runs on the bot's configured model (``self._initial_model``; None → CLI
         default) — never assumes a specific model like Haiku is available on the
-        account. Returns None on failure.
+        account.
+
+        Returns:
+            A title of at most ``_TITLE_MAX_LEN`` characters, or None when the
+            call failed or produced nothing.
         """
         prompt = _TITLE_PROMPT.format(lang=self._lang) + text[:2000]
         # Stay on the bot's configured model/provider; never assume a specific
@@ -561,6 +582,10 @@ class ClaudeAgentBackend(BaseAgentBackend):
         ``~/.claude/projects/<cwd-key>/<session_id>.jsonl``. Glob for it so the
         exact project-key encoding never has to be reproduced; fall back to the
         ``<cwd>``-derived path when no file is found yet.
+
+        Returns:
+            The transcript path, the expected path when the file does not exist
+            yet, or None without a session id.
         """
         if not session_id:
             return None
@@ -601,6 +626,14 @@ class ClaudeAgentBackend(BaseAgentBackend):
         the id first appears (the ``init`` system message), ``on_session_path``
         is invoked with the live provider transcript path. ``idle_timeout_sec``
         bounds silence between SDK events; ``None`` or ``0`` disables it.
+
+        Returns:
+            The final text with session id, transcript path and provider error
+            metadata.
+
+        Raises:
+            AgentEventStreamTimeoutError: No SDK event arrived within
+                ``idle_timeout_sec``.
         """
         allow = set(allowed_tools)
         skip_perms = self._dangerously_skip_permissions

@@ -139,6 +139,9 @@ class TaskScheduler:
         A failed tick is logged and the loop continues; cancellation propagates.
         The heartbeat is refreshed after every pass (success or caught error) so
         it proves the loop is cycling, not that any one tick succeeded.
+
+        Raises:
+            asyncio.CancelledError: Propagated when the scheduler is stopped.
         """
         await self._recover_interrupted_running()
         await self._write_heartbeat()  # mark alive before the first tick
@@ -283,6 +286,9 @@ class TaskScheduler:
         completed without running; a recurring run later than its grace window
         (period/2, clamped) is fast-forwarded instead of fired. Otherwise the
         single catch-up run proceeds.
+
+        Returns:
+            ``run``, ``skip`` or ``complete``.
         """
         if task.next_run_at is None:
             return "skip"

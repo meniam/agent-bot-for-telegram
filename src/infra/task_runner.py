@@ -37,6 +37,9 @@ def broadcast_targets(cfg: BotConfig) -> list[int]:
 
     With ``allowed_for_all`` there is no enumerable chat list (Telegram polling
     gives none), so a global task can only reach explicitly allowed chats.
+
+    Returns:
+        Sorted chat ids.
     """
     blacklist = set(cfg.blacklist_chat_ids)
     return sorted(c for c in cfg.allowed_chat_ids if c not in blacklist)
@@ -124,6 +127,9 @@ class TaskRunner:
         Serializes on the workdir lock when the task needs it. Non-empty output
         of a successful run is delivered to the task's targets; the run is then
         recorded to history regardless of outcome.
+
+        Returns:
+            The run outcome as recorded in history.
         """
         with task_log_context(self._cfg.name, task.id):
             log.info(
@@ -260,8 +266,12 @@ class TaskRunner:
     def _resolve_script(self, task: Task) -> Path:
         """Resolve a task's script to an existing path inside ``scripts_dir``.
 
-        Raises ValueError if no script/dir is configured, the path escapes the
-        scripts directory, or the file does not exist.
+        Returns:
+            The absolute script path.
+
+        Raises:
+            ValueError: No script or ``scripts_dir`` is configured, the path
+                escapes ``scripts_dir``, or the file is missing.
         """
         if not task.script:
             raise ValueError("script task has no script path")
@@ -281,6 +291,12 @@ class TaskRunner:
         Shell scripts run under bash, others under the current interpreter.
         Output is decoded, truncated to the configured cap, and stripped; a
         timeout kills the process and raises ValueError.
+
+        Returns:
+            The exit code and the captured, truncated output.
+
+        Raises:
+            ValueError: The script exceeded its timeout and was killed.
         """
         script = self._resolve_script(task)
         if script.suffix in {".sh", ".bash"}:
@@ -366,7 +382,13 @@ class TaskRunner:
         Uses the configured ``tasks.allowed_tools`` or, when unset, the
         read-only `DEFAULT_ALLOWED_TOOLS`. Enforces the configured scheduled-LLM
         total and idle timeouts, returning provider-shaped error metadata so the
-        caller still records history. Raises ValueError on a missing prompt.
+        caller still records history.
+
+        Returns:
+            The provider result, or an error-shaped result on timeout.
+
+        Raises:
+            ValueError: The task has no prompt.
         """
         if not task.prompt:
             raise ValueError("LLM task has no prompt")
@@ -429,6 +451,9 @@ class TaskRunner:
 
         Global tasks broadcast to `broadcast_targets`; user tasks go to the
         owner. A failure to one chat is logged and does not stop the rest.
+
+        Returns:
+            Who received the output, per-chat errors and the overall status.
         """
         targets = broadcast_targets(self._cfg) if task.scope == "global" else [task.owner_chat_id]
         delivered: list[int] = []

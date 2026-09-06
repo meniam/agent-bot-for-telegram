@@ -42,6 +42,9 @@ async def handle(
     sets the abort flag), remaining questions are recorded as skipped. Always
     returns a Deny-shaped result whose message *is* the answer summary — the SDK
     feeds it back to the model as the tool result. Timeout → "no response".
+
+    Returns:
+        A Deny-shaped result whose message is the answer summary.
     """
     t = gate.t
     questions = tool_input.get("questions") or []
@@ -103,9 +106,15 @@ async def _ask_one(
     """Render one question's keyboard and await the pick.
 
     Registers an `_AQSession` in ``gate.aq`` keyed by a token embedded in
-    callback_data; `on_callback` mutates its selection and resolves the future.
-    Returns the chosen labels, or None for Skip/abort. Raises `TimeoutError`
+    callback_data; `on_callback` mutates its selection and resolves the future. Raises `TimeoutError`
     when the user does not answer within ``gate.timeout``.
+
+    Returns:
+        The chosen option labels, or None when the user skipped or the flow
+        was aborted.
+
+    Raises:
+        ValueError: The question has no options.
     """
     from .gate import _AQSession
 
@@ -315,6 +324,9 @@ def _format_answers(
 
     ``None`` answers render as skipped, an empty list as no selection, and a
     non-empty list as the chosen labels.
+
+    Returns:
+        One line per question, ready to send to the model.
     """
     lines = ["User responded to AskUserQuestion via Telegram inline buttons:"]
     for i, (q, answers) in enumerate(collected, 1):

@@ -23,9 +23,12 @@ DEFAULT_MAX_AGE = 120.0
 def check(path: Path, max_age: float, now: datetime | None = None) -> tuple[str, float | None]:
     """Classify the heartbeat as ``ok`` / ``stale`` / ``missing``.
 
-    Returns the status and the beat's age in seconds (``None`` when missing or
-    unreadable). A future-dated beat (clock skew) reports a negative age but is
+    A future-dated beat (clock skew) reports a negative age but is
     still ``ok``.
+
+    Returns:
+        The status and the beat's age in seconds; the age is None when the
+        beat is missing or unreadable.
     """
     try:
         raw = path.read_text(encoding="utf-8").strip()

@@ -158,8 +158,9 @@ class PiRpcProcess:
     async def _ensure_started(self) -> None:
         """Start the subprocess if needed and assert it is alive with usable stdin.
 
-        Raises ``RuntimeError`` if the transport is closed, failed to start, or
-        the process has already exited.
+        Raises:
+            RuntimeError: The transport is closed, never started, or its process
+                has exited.
         """
         if self._closed:
             raise RuntimeError("PI RPC process closed")
@@ -343,6 +344,14 @@ class PiAgentBackend(BaseAgentBackend):
         Extracts inline images, watchdogs the event stream, and falls back to the
         last assistant text when no delta arrived. Raises ``AgentTurnResetError`` on a
         mid-turn reset or ``AgentEventStreamTimeoutError`` if the stream stalls.
+
+        Yields:
+            Assistant text deltas, or the final text as one chunk when no delta
+            arrived.
+
+        Raises:
+            RuntimeError: The RPC ``prompt`` command was rejected.
+            AgentTurnResetError: The session was reset mid-turn.
         """
         async with self._lock(chat_id):
             session = await self._get_session(chat_id)
@@ -404,6 +413,12 @@ class PiAgentBackend(BaseAgentBackend):
         On ``PI_EVENT_TIMEOUT_SEC`` with no event it emits a post lifecycle
         event, best-effort sends ``abort_bash``/``abort`` to stop the run, and
         raises ``AgentEventStreamTimeoutError``.
+
+        Returns:
+            The next RPC event.
+
+        Raises:
+            AgentEventStreamTimeoutError: No event within ``PI_EVENT_TIMEOUT_SEC``.
         """
         try:
             return await asyncio.wait_for(
@@ -457,6 +472,9 @@ class PiAgentBackend(BaseAgentBackend):
 
         Folds the bot's system prompt and any plan/read_only/no_tools directive
         in front of the user text (PI's RPC has no separate mode switch here).
+
+        Returns:
+            The prompt with system and mode preambles, separated by blank lines.
         """
         parts: list[str] = []
         if self._system_prompt:
@@ -482,6 +500,9 @@ class PiAgentBackend(BaseAgentBackend):
 
         Returns the text delta from a ``message_update``/``text_delta`` event;
         otherwise forwards any tool event to the callback and returns None.
+
+        Returns:
+            The text delta, or None for non-text events.
         """
         event_type = str(event.get("type") or "")
         if event_type == "message_update":
@@ -500,6 +521,9 @@ class PiAgentBackend(BaseAgentBackend):
 
         ``start`` yields ``pre``; ``end`` and ``update`` both yield ``post``
         (the latter flagged ``partial``). None for non-tool events.
+
+        Returns:
+            The phase, tool name and payload, or None for non-tool events.
         """
         event_type = str(event.get("type") or "")
         if not event_type.startswith("tool_execution_"):
@@ -547,6 +571,9 @@ class PiAgentBackend(BaseAgentBackend):
 
         Skips non-image MIME types and unreadable files. File reads run in a
         worker thread so they never block the event loop.
+
+        Returns:
+            RPC image parts with base64 data and MIME type, in prompt order.
         """
         images: list[dict[str, str]] = []
         for path in self._attachment_image_paths(prompt):
@@ -593,7 +620,11 @@ class PiAgentBackend(BaseAgentBackend):
     async def _create_transport(self, model: str | None) -> PiRpcTransport:
         """Build and start a transport: the injected factory (tests) or a real PI process.
 
-        Raises ``RuntimeError`` when no ``pi`` CLI binary can be resolved.
+        Returns:
+            A started transport.
+
+        Raises:
+            RuntimeError: No ``pi`` binary is configured or found on PATH.
         """
         if self._transport_factory is not None:
             return self._transport_factory(model)
@@ -664,6 +695,9 @@ class PiAgentBackend(BaseAgentBackend):
 
         Splits ``provider/model_id:thinking`` into structured fields; a bare
         string (or None) is passed as the ``model`` value.
+
+        Returns:
+            The RPC command dict.
         """
         if not model:
             return {"type": "set_model", "model": None}
@@ -748,6 +782,9 @@ class PiAgentBackend(BaseAgentBackend):
         """Reset the chat's session: new-session RPC if persistent, else close it.
 
         Force-closes when a turn is in flight.
+
+        Raises:
+            RuntimeError: The ``new_session`` RPC reported an error.
         """
         lock = self._locks.get(chat_id)
         if chat_id in self._active or (lock is not None and lock.locked()):
@@ -836,6 +873,9 @@ class PiAgentBackend(BaseAgentBackend):
         """Normalize a raw model entry to a ``(value, label)`` pair; ``("", "")`` if unusable.
 
         Builds the value as ``provider/model_id`` when a provider is present.
+
+        Returns:
+            The ``(value, label)`` pair, or ``("", "")`` for an unusable entry.
         """
         if isinstance(item, str):
             return item, item

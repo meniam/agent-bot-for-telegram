@@ -180,6 +180,9 @@ class SessionStore:
         Used by the SQLite log handler's session resolver, which runs in the
         QueueListener's background thread (no event loop to await on). Event-loop
         callers must use the async `current` instead.
+
+        Returns:
+            The current session, or None when the chat has none.
         """
         return self._current_sync(chat_id)
 
@@ -281,6 +284,10 @@ class SessionStore:
         If the deleted session was current, repoint current to the most
         recently created remaining session (or None if none are left). The
         SDK's on-disk JSONL is left untouched.
+
+        Returns:
+            The id of the session that is current after the deletion, or None
+            when none remain.
         """
         return await asyncio.to_thread(self._delete_sync, chat_id, sid)
 

@@ -34,6 +34,9 @@ def _make_rule(marker: str, node_type: str, tag: str) -> tuple[_RuleFn, _PostFn]
     Models the built-in strikethrough delimiter logic, emitting
     ``{node_type}_open``/``_close`` tokens with HTML ``tag`` for each matched
     ``marker``-doubled span.
+
+    Returns:
+        The tokenizer and the postprocessor to register with markdown-it.
     """
     marker_code = ord(marker)
 

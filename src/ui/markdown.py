@@ -135,8 +135,9 @@ def _passthrough_safe_tags(raw: str) -> str:
 def _media_block(node: SyntaxTreeNode) -> str | None:
     """Render an image node as a Telegram media block.
 
-    Returns None unless the node is a standalone HTTP(S) media URL that maps to
-    an img/video/audio extension.
+    Returns:
+        The media block HTML, or None when the node is not a standalone
+        HTTP(S) media URL with an img/video/audio extension.
     """
     src = str(node.attrGet("src") or "")
     scheme = urlsplit(src).scheme.lower()
@@ -443,6 +444,9 @@ def to_rich_html(text: str) -> str:
     `_render` emits around block tags are dropped (the tags space themselves;
     keeping them would double every gap). `<pre>` keeps newlines significant;
     `<table>` drops the structural newlines between rows/cells.
+
+    Returns:
+        Rich Message HTML.
     """
     converted = to_html(text)
     out: list[str] = []

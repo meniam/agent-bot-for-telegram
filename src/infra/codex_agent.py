@@ -157,7 +157,12 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Uses the injected factory when present (tests); otherwise imports
         ``openai_codex`` and wires the resolved binary/cwd into ``CodexConfig``.
-        Raises ``RuntimeError`` if the package is missing.
+
+        Returns:
+            The entered ``AsyncCodex`` runtime.
+
+        Raises:
+            RuntimeError: ``openai_codex`` is not installed.
         """
         if self._codex is not None:
             return self._codex
@@ -201,6 +206,9 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Passes only the configured model/sandbox/cwd/instructions/approval that
         resolve to non-None values, then stores the live ``_CodexSession``.
+
+        Returns:
+            The live Codex thread object.
         """
         codex = await self._ensure_runtime()
         kwargs: dict[str, Any] = {}
@@ -232,6 +240,10 @@ class CodexAgentBackend(BaseAgentBackend):
         Every configured mode collapses to ``auto_review`` (the bot has no
         interactive Codex approval gate); the raw string is returned when the
         SDK enum is unavailable or a factory is injected (tests).
+
+        Returns:
+            The SDK enum member, the raw string, or None when no mode is
+            configured.
         """
         # Codex's SDK ``ApprovalMode`` exposes only ``auto_review`` (act without
         # prompting) and ``deny_all`` (refuse anything needing approval). This
@@ -256,6 +268,10 @@ class CodexAgentBackend(BaseAgentBackend):
         Normalizes ``danger_full_access`` to the SDK's ``full_access`` and
         returns the raw string when the SDK enum is unavailable or a factory is
         injected (tests).
+
+        Returns:
+            The SDK enum member, the raw string, or None when no sandbox is
+            configured.
         """
         sandbox_name = (
             "full_access" if self._sandbox_name == "danger_full_access" else self._sandbox_name
@@ -293,6 +309,12 @@ class CodexAgentBackend(BaseAgentBackend):
         Mirrors tool lifecycle events through the callback. Raises
         ``AgentTurnResetError`` if the session is reset mid-turn or
         ``AgentEventStreamTimeoutError`` if the run stalls.
+
+        Yields:
+            The final response text as one chunk.
+
+        Raises:
+            AgentTurnResetError: The session was reset while the turn was in flight.
         """
         async with self._lock(chat_id):
             thread = await self._get_thread(chat_id)
@@ -346,6 +368,14 @@ class CodexAgentBackend(BaseAgentBackend):
         Awaitable turns are bounded by ``CODEX_RUN_TIMEOUT_SEC``; on timeout it
         emits a post lifecycle event, cancels the turn, and raises
         ``AgentEventStreamTimeoutError``.
+
+        Returns:
+            A normalized result dict for streamed turns, else the awaited SDK
+            result.
+
+        Raises:
+            AgentEventStreamTimeoutError: The awaitable turn exceeded
+                ``CODEX_RUN_TIMEOUT_SEC``.
         """
         if hasattr(turn, "stream"):
             return await self._wait_for_streamed_turn(chat_id, turn)
@@ -375,6 +405,14 @@ class CodexAgentBackend(BaseAgentBackend):
         event ``wait_for`` enforces ``CODEX_RUN_TIMEOUT_SEC``; a mid-turn reset
         raises ``AgentTurnResetError`` and a ``failed`` turn raises ``RuntimeError``.
         The stream is always closed in ``finally``.
+
+        Returns:
+            Collected items, token usage and the final response under stable
+            keys.
+
+        Raises:
+            AgentTurnResetError: The session was reset mid-turn.
+            RuntimeError: The turn ended with status ``failed``.
         """
         stream = turn.stream()
         items: list[dict[str, Any]] = []
@@ -440,6 +478,9 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Raises ``AgentEventStreamTimeoutError``; called when a streamed turn's next
         event does not arrive within ``CODEX_RUN_TIMEOUT_SEC``.
+
+        Raises:
+            AgentEventStreamTimeoutError: Always.
         """
         msg = f"Codex run timed out after {self._event_timeout:.0f}s waiting for completion"
         log.warning("%s (chat_id=%s)", msg, chat_id)
@@ -503,6 +544,9 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Also unwraps the single-key ``{"root"}`` wrapper that pydantic
         ``RootModel`` dumps produce.
+
+        Returns:
+            A JSON-safe copy built from dicts, lists and scalars.
         """
         if hasattr(value, "model_dump"):
             value = value.model_dump(mode="json")
@@ -529,6 +573,9 @@ class CodexAgentBackend(BaseAgentBackend):
         """Pull the final assistant text from a result attr or dict key.
 
         Tries common shapes in order and falls back to ``str(result)``.
+
+        Returns:
+            The assistant text, or an empty string when ``result`` is None.
         """
         for attr in ("final_response", "final", "text", "output_text"):
             value = getattr(result, attr, None)
@@ -546,6 +593,10 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Prefers the latest ``final_answer``-phase message; otherwise returns the
         most recent assistant message text seen.
+
+        Returns:
+            The message text, or an empty string when no assistant message was
+            seen.
         """
         fallback: str | None = None
         for item in reversed(items):
@@ -581,6 +632,9 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Returns assistant text deltas when present and mirrors tool lifecycle
         events through the provider-neutral callback.
+
+        Returns:
+            The text delta, or None for events that carry no assistant text.
         """
         method = str(event.get("method") or event.get("type") or "")
         params = event.get("params") if isinstance(event.get("params"), dict) else event
@@ -620,6 +674,9 @@ class CodexAgentBackend(BaseAgentBackend):
         Returns ``pre`` for started/in-progress items and ``post`` for
         completed/failed/declined ones; None when the item is not a recognized
         tool call.
+
+        Returns:
+            The phase, tool name and payload, or None for non-tool items.
         """
         item = params.get("item")
         if not isinstance(item, dict):

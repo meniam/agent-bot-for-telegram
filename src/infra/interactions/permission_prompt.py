@@ -40,6 +40,10 @@ async def handle(
     inline keyboard, then blocks on the future until `on_callback` resolves it
     or the timeout fires (timeout → deny, prompt deleted). "Always" returns an
     Allow carrying a session-scoped `addRules` permission update.
+
+    Returns:
+        Allow (with ``addRules`` for "Always"), or Deny on Deny, timeout or a
+        failed prompt send.
     """
     t = gate.t
     request_id = secrets.token_hex(8)

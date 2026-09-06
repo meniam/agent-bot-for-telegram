@@ -49,6 +49,12 @@ class GroqTranscriber:
         `audio` accepts raw bytes or any binary file-like object. The file-like
         path lets the caller stream a large recording from disk without
         loading it into memory.
+
+        Returns:
+            The transcript text, stripped; empty when Groq returned none.
+
+        Raises:
+            TranscriptionError: Groq answered with an error response.
         """
         url = f"{self._base_url}/audio/transcriptions"
         form = aiohttp.FormData()

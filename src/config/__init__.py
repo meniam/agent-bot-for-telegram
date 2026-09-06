@@ -234,6 +234,9 @@ def is_admin(cfg: BotConfig, chat_id: int) -> bool:
     """Whether ``chat_id`` may manage global tasks and create script tasks.
 
     Fail-closed: an empty ``admin_chat_ids`` means there are no admins.
+
+    Returns:
+        True when the chat is listed in ``admin_chat_ids``.
     """
     return chat_id in cfg.admin_chat_ids
 
@@ -243,8 +246,14 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
 
     Top-level scalars pass through; recognized object sections (``gateway``,
     ``agent``, ``providers.*``, and other ``NESTED_CONFIG_SECTIONS``) have their
-    keys remapped to flat targets. Unknown sections/keys and fields set both
-    directly and via a section raise ``ValueError``.
+    keys remapped to flat targets.
+
+    Returns:
+        Flat mapping of ``BotConfig`` field names to raw values.
+
+    Raises:
+        ValueError: An unknown section or key, a non-object section, or a
+            field set both directly and through a section.
     """
     flat: dict[str, Any] = {}
     nested: dict[str, dict[str, Any]] = {}
@@ -327,6 +336,9 @@ def _resolve_path(raw: str, base_dir: Path) -> Path:
 
     Expand ``~`` and anchor relative paths to the config file's directory (not
     the process CWD), then resolve.
+
+    Returns:
+        The absolute, resolved path.
     """
     p = Path(raw).expanduser()
     if not p.is_absolute():
@@ -340,6 +352,13 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
     Flatten nested sections, resolve and create directory paths relative to
     ``base_dir``, fall back to environment variables for the bot token and Groq
     key, coerce chat-id and tool lists, then validate the assembled payload.
+
+    Returns:
+        The validated config for bot ``name``.
+
+    Raises:
+        ValueError: A missing token, a missing directory, or a malformed
+            list field.
     """
     data = _flatten_nested_sections(name, data)
 
@@ -516,8 +535,15 @@ def _read_config_data(path: Path) -> dict[str, Any]:
 def load(path: Path | str | None = None) -> dict[str, BotConfig]:
     """Load and validate every bot config from ``path`` (or the default file).
 
-    Returns a ``{name: BotConfig}`` dict. Accepts both the multi-bot mapping
+    Accepts both the multi-bot mapping
     format and the flat single-bot format (wrapped under the name "default").
+
+    Returns:
+        Mapping of bot name to validated config.
+
+    Raises:
+        FileNotFoundError: No config file at ``path`` or the default locations.
+        ValueError: The file is empty, not a mapping, or a bot entry is invalid.
     """
     p = Path(path) if path is not None else _default_config_path()
     if not p.exists():

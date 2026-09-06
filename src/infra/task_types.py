@@ -180,6 +180,13 @@ def parse_schedule(text: str, *, now: datetime | None = None) -> TaskSchedule:
       - "2026-02-03T14:00[:00]"      → one-shot at an ISO timestamp
       - "every 30m" / "every 1d"     → recurring interval
       - "0 9 * * *"                  → cron (requires croniter)
+
+    Returns:
+        The parsed schedule with a display string.
+
+    Raises:
+        ValueError: The text is empty, an invalid timestamp, or matches no
+            accepted form.
     """
     now = now or _now()
     raw = text.strip()
@@ -248,6 +255,12 @@ def compute_next_run(
     For recurring schedules the base is ``last_run`` when available (so a
     restart anchors to the real last execution), else ``now``. A one-shot that
     already ran (``last_run`` set) returns None.
+
+    Returns:
+        The next fire time, or None when the schedule has no further runs.
+
+    Raises:
+        ValueError: ``schedule.kind`` is not ``once``, ``interval`` or ``cron``.
     """
     now = now or _now()
 
@@ -278,6 +291,10 @@ def compute_grace_seconds(schedule: TaskSchedule, *, now: datetime | None = None
     """How late a recurring run may be and still catch up (else fast-forward).
 
     Half the schedule period, clamped to [MIN_GRACE, MAX_GRACE].
+
+    Returns:
+        The grace window in seconds; ``MIN_GRACE_SECONDS`` for one-shots and
+        invalid cron expressions.
     """
     if schedule.kind == "interval" and schedule.interval_sec:
         return max(MIN_GRACE_SECONDS, min(schedule.interval_sec // 2, MAX_GRACE_SECONDS))

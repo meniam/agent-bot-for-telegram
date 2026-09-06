@@ -27,6 +27,9 @@ async def handle(
     Always returns a *Deny-shaped* result on purpose: the SDK feeds
     ``PermissionResultDeny.message`` back as the tool result, so the message
     carries the delivery status (delivered / empty / failed), not a refusal.
+
+    Returns:
+        A Deny-shaped result whose message reports delivered, empty or failed.
     """
     message = str(tool_input.get("message", "") or "").strip()
     if not message:

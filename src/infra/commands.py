@@ -64,8 +64,9 @@ class CommandDef:
 def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Parse a leading `--- ... ---` frontmatter block.
 
-    Returns `(metadata, body)`. If the file has no frontmatter, metadata is
-    empty and body is the full text.
+    Returns:
+        The metadata mapping and the body text; without frontmatter the
+        metadata is empty and the body is the full text.
     """
     stripped = text.lstrip("﻿")  # tolerate UTF-8 BOM
     if not stripped.startswith("---"):
@@ -98,6 +99,10 @@ def load_commands(commands_dir: Path) -> list[CommandDef]:
     Files that fail validation are skipped with a warning so a single bad
     file does not break the bot. Names colliding with built-ins or with
     each other are dropped.
+
+    Returns:
+        Valid command definitions in discovery order; empty when the
+        directory does not exist.
     """
     if not commands_dir.is_dir():
         log.warning("commands_dir does not exist or is not a directory: %s", commands_dir)

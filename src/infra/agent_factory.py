@@ -38,7 +38,11 @@ def create_agent_backend(
 ) -> AgentBackend:
     """Build the agent backend selected by ``cfg.agent_provider``.
 
-    Raises ``ValueError`` for an unsupported provider.
+    Returns:
+        A backend for the configured provider.
+
+    Raises:
+        ValueError: ``cfg.agent_provider`` is not ``claude``, ``codex`` or ``pi``.
     """
     if cfg.agent_provider == "claude":
         return ClaudeAgentBackend(

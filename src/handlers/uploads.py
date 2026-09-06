@@ -31,8 +31,13 @@ async def _save_upload(
 ) -> PendingFile | None:
     """Download a Telegram file into the per-chat uploads dir.
 
-    Returns the resulting PendingFile or None on a handled error
-    (caller has already replied to the user).
+    Returns:
+        The saved file, or None when the download failed and the user was
+        already told.
+
+    Raises:
+        RuntimeError: Uploads are disabled for this bot; callers check
+            ``ctx.uploads`` first.
     """
     if ctx.uploads is None:
         raise RuntimeError("uploads are disabled; caller must check ctx.uploads first")

@@ -67,6 +67,9 @@ def _build_bot_command_list(
 
     The ``/tasks`` and ``/task`` entries are included only when
     ``tasks_enabled`` is set.
+
+    Returns:
+        Menu entries in display order: built-ins first, then custom commands.
     """
     builtin = [
         BotCommand(command="start", description=tr.t("bot_command_start")),
@@ -110,6 +113,9 @@ def _messages_dir(cfg: BotConfig) -> Path | None:
 
     None when no `logs_dir` (SQLite message logging disabled); `SessionStore`
     then falls back to its own dir under `var/sessions`.
+
+    Returns:
+        The directory for per-chat SQLite files, or None when disabled.
     """
     if cfg.messages_dir:
         return Path(cfg.messages_dir)
@@ -138,6 +144,9 @@ def _attach_task_log(bot_name: str, tasks_dir: Path) -> TaskLogHandle:
 
     The handler is filtered by task log context, so shared module loggers can be
     used without cross-writing between bots with different ``tasks_dir`` values.
+
+    Returns:
+        A handle that detaches the handler on shutdown.
     """
     base = TaskRunner.__module__.rsplit(".", 1)[0]  # e.g. "src.infra"
     names = (

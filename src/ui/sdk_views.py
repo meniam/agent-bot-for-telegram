@@ -14,6 +14,9 @@ def _mono_table(rows: list[tuple[str, ...]], aligns: str) -> str:
     Telegram ignores the HTML `align` attribute on table cells, so a `<pre>`
     block with manual padding is the only reliable way to right-align columns.
     `aligns` is one char per column: 'r' right-justified, anything else left.
+
+    Returns:
+        A fenced code block with padded columns.
     """
     cols = len(aligns)
     widths = [max(len(r[i]) for r in rows) for i in range(cols)]
@@ -37,6 +40,9 @@ def format_context_usage(
 
     `provider`/`model` override the usage payload so the report names the
     backend the user actually selected; falls back to the payload's model.
+
+    Returns:
+        Markdown text for the ``/context`` reply.
     """
     total = int(usage.get("totalTokens") or 0)
     max_t = int(usage.get("maxTokens") or 0)

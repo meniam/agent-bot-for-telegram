@@ -40,6 +40,9 @@ def _build_draft_html(
 
     Shows a <tg-thinking> block when extended-thinking tokens are present,
     followed by the accumulated text response.
+
+    Returns:
+        HTML for ``sendMessageDraft``.
     """
     parts: list[str] = []
     if thinking:
@@ -78,7 +81,10 @@ class DraftStreamer:
         """Consume reply chunks, push throttled drafts, and return the full text.
 
         Draft sends are best-effort: a failed ``sendRichMessageDraft`` is logged
-        and skipped. Returns the accumulated text (thinking tokens excluded).
+        and skipped.
+
+        Returns:
+            The accumulated reply text, thinking tokens excluded.
         """
         draft_id = next(_draft_seq) % 2_147_483_647
         last_sent = 0.0

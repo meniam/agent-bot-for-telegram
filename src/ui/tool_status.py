@@ -100,6 +100,9 @@ def _tool_display(tool_name: str) -> str:
 
     MCP tools arrive as ``mcp__<server>__<tool>``; show them compactly as
     ``MCP:<tool>`` and pick the emoji from the bare tool name.
+
+    Returns:
+        The emoji and the display label separated by a space.
     """
     label = tool_name
     emoji_key = tool_name

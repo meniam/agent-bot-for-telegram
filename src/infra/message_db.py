@@ -126,6 +126,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
     Used by both `SqliteChatLogHandler` (long-lived) and `SessionStore`
     (short-lived per op). `CREATE TABLE IF NOT EXISTS` makes concurrent
     initialization from either side safe.
+
+    Returns:
+        An open connection with WAL enabled and the schema applied.
     """
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -240,6 +243,9 @@ def _filters(
     fixed column comparisons; every user value is a bound parameter — no
     injection vector. The clause has no leading ``WHERE``/``AND`` so callers can
     splice it into either context.
+
+    Returns:
+        The predicate string and its bound parameters, in order.
     """
     where: list[str] = []
     params: list[Any] = []
@@ -273,6 +279,9 @@ def query_messages(
     interval, returns the latest ``limit`` messages in chronological order; with
     an interval, returns matching messages ascending. A missing file or table
     yields ``[]``. ``limit`` is capped at ``MESSAGES_MAX_LIMIT``.
+
+    Returns:
+        Message rows as dicts; empty when the file or table does not exist.
     """
     if not db_path.exists():
         return []
@@ -336,6 +345,10 @@ def search_messages(
     Opens the database read-write via ``connect`` so the FTS table is created
     and back-filled on demand (self-heal for databases predating the index).
     A missing file, missing FTS5 support, or malformed MATCH yields ``[]``.
+
+    Returns:
+        Matching rows as dicts with a ``snippet`` key; empty when there is
+        no file, no FTS5 support or a malformed MATCH expression.
     """
     if not db_path.exists() or not query.strip():
         return []

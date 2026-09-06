@@ -146,6 +146,9 @@ class TelegramInteractionGate:
 
         Combines the context title/description/reason/blocked path with a
         truncated preview of ``tool_input`` into a single block of text.
+
+        Returns:
+            The prompt body, sections separated by blank lines.
         """
         t = self.t
         head = ctx.title or t.t("permission_request_default_title", tool=tool_name)
@@ -180,6 +183,9 @@ class TelegramInteractionGate:
         `AskUserQuestion` / `ExitPlanMode` / `PushNotification` get bespoke flows;
         every other tool gets the generic Allow/Deny/Always prompt. Blocks until
         the user responds or the flow times out (timeout resolves as deny).
+
+        Returns:
+            Allow or Deny as decided by the flow; a timeout is a Deny.
         """
         if tool_name == "AskUserQuestion":
             return await aq.handle(self, chat_id, tool_input)
@@ -222,9 +228,9 @@ class TelegramInteractionGate:
     def consume_plan_text(self, chat_id: int, text: str) -> bool:
         """Feed a freeform text message to a pending ExitPlanMode prompt.
 
-        Returns True if the chat had a pending plan future and we consumed
-        the text as rejection-with-feedback. Returns False if the caller
-        should treat the text as a normal user message instead.
+        Returns:
+            True when the text was consumed as rejection feedback for a pending
+            plan; False when the caller should treat it as a normal message.
         """
         return pm.consume_text(self, chat_id, text)
 

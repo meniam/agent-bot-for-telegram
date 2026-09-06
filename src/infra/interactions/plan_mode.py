@@ -39,6 +39,10 @@ async def handle(
     (`on_callback`) or a freeform text reply (`consume_text`) can resolve it.
     Approve → Allow; reject/timeout → Deny whose message carries the user's
     feedback so the model revises and calls ExitPlanMode again.
+
+    Returns:
+        Allow on approval; Deny carrying the feedback text on reject or
+        timeout.
     """
     t = gate.t
     plan = str(tool_input.get("plan", "") or "").strip()
@@ -172,9 +176,9 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
 def consume_text(gate: TelegramInteractionGate, chat_id: int, text: str) -> bool:
     """Resolve a pending plan prompt with a freeform text reply as rejection.
 
-    Returns True if a pending, unresolved plan future existed and the text was
-    consumed as rejection-with-feedback; False otherwise (caller treats the
-    text as a normal message).
+    Returns:
+        True when a pending plan future was resolved with the text; False
+        when the caller should treat it as a normal message.
     """
     entry = gate.plan_pending.get(chat_id)
     if entry is None:

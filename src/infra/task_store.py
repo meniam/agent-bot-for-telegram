@@ -133,6 +133,9 @@ class TaskStore:
 
         A missing file yields ``[]``. Unparsable or malformed files are moved
         aside; individual invalid task entries are logged and skipped.
+
+        Returns:
+            The tasks in the file; empty when it is missing or was quarantined.
         """
         if not path.exists():
             return []
@@ -183,6 +186,9 @@ class TaskStore:
 
         When ``include_global`` is set, global tasks are folded in as well (for
         admin callers).
+
+        Returns:
+            Tasks newest first.
         """
         return await asyncio.to_thread(self._list_all_sync, chat_id, include_global)
 
@@ -238,7 +244,14 @@ class TaskStore:
         """Persist a new task (assigning an id if needed) into its scope file.
 
         Validates any caller-supplied id and inserts the task newest-first under
-        the store lock. Returns the stored task.
+        the store lock.
+
+        Returns:
+            The stored task.
+
+        Raises:
+            ValueError: The supplied id contains path separators or other unsafe
+                characters.
         """
         if not task.id:
             task = task.model_copy(update={"id": new_task_id()})
