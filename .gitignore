@@ -12,7 +12,6 @@ logs/
 uploads/
 commands/
 var/
-docs/plans/
 AUDIT.md
 DEPLOY.md
 promo.txt

@@ -14,6 +14,50 @@ before changing behavior.
 
 ---
 
+## Rules and Journals
+
+Eugene's shared rules live as a **copy** in `.agents/rules/` (source:
+`~/.agents/rules`, updated by copying by hand, not a symlink: the repository is
+built into a Docker image and cloned on servers without that home directory).
+Index: `.agents/rules/AGENTS.md`. Journal rules are included here:
+
+@.agents/rules/decisions.md
+@.agents/rules/learning.md
+@.agents/rules/changelog.md
+
+`plans.md` is pulled in through `.agents/plans/AGENTS.md`. Read `db.md` before
+touching a schema. Python and Ruff conventions are not copied here: they are
+applied through `pyproject.toml` and `justfile`, and their source is
+`~/.agents/rules/python.md` and `~/.agents/rules/ruff.md` on Eugene's machine.
+
+Four journals, one question each. Every directory has its own `AGENTS.md` with
+project-specific notes. The record goes in the **same commit** as the change.
+
+| Question                | Where                            | Rules          |
+| ----------------------- | -------------------------------- | -------------- |
+| How do we do it?        | `.agents/plans/`                 | `plans.md`     |
+| Why is it like this?    | `.agents/decisions/` + `_TOC.md` | `decisions.md` |
+| What did we find out?   | `.agents/learnings/` + `_TOC.md` | `learning.md`  |
+| What changed, and when? | `CHANGELOG.md`                   | `changelog.md` |
+
+- New plan: `.agents/plans/YYYYMMDD_HHMM_short_task_name.md`, branch
+  `<type>/YYYYMMDD_HHMM_short_task_name`. Plans created before 2026-09-06 were
+  renamed to this scheme; the time in their names is reconstructed from git
+  (see `.agents/decisions/`).
+- If asked only to write or discuss a plan, do not change code until a
+  separate confirmation. Execute an approved plan in its own branch and keep it
+  updated as you go; `- [x]` only after the step's check is green.
+- Temporary artifacts go to `var/agents/plans/<planName>`, never into
+  `.agents/plans`.
+- A decision that outlives its plan gets a file in `.agents/decisions/` before
+  the plan reaches `done`; a change visible outside the code gets a line in
+  `CHANGELOG.md` under the date of the change. `CHANGELOG.md` starts on
+  2026-09-06; earlier history is `git log` and the plans.
+- Header keys and section names in journal records are English, as in the
+  rules; record text is Russian. Code, comments and docstrings stay English.
+
+---
+
 ## Project Shape
 
 This is a multi-bot Telegram -> agent-SDK bridge. One Python process can
