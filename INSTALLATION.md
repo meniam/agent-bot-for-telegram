@@ -141,7 +141,7 @@ uv run python -m src.bot   # or: just run, or .venv/bin/abt
 You should see in the console:
 
 ```
-INFO src.bot: loaded 1 bot(s): brain
+INFO __main__: loaded 1 bot(s): brain
 INFO bot.brain: [brain] starting as @YourBot
 INFO aiogram.dispatcher: Run polling for bot @YourBot ...
 ```
