@@ -141,6 +141,10 @@ Important optional features:
 - `commands_dir: null` disables custom slash commands.
 - configured `uploads_dir` is also passed to Claude SDK `add_dirs`.
 - `system_prompt: null` falls back to i18n key `default_system_prompt`.
+- `agent_dangerously_skip_permissions: true` (Claude only) bypasses the
+  permission gate for the live session and for scheduled LLM tasks.
+- `agent_event_timeout_sec` (default 120) interrupts a turn when the backend
+  emits no event for that long; it is separate from `agent_timeout_sec`.
 
 Path fields (`working_dir`, `logs_dir`, `uploads_dir`,
 `commands_dir`) expand `~` and resolve **relative to the config file's
@@ -332,11 +336,13 @@ language.
 
 ## Tests
 
-Unit tests cover pure modules: config, commands, i18n, uploads, markdown,
-reactions, SDK view formatting, plan router, streaming redaction, log LRU,
-bot factories, agent backends, the session store, the SQLite message log + FTS
-search, questionnaire rendering, and the task subsystem (schedule math, store,
-runner script execution, scheduler dispatch/grace).
+Unit tests cover pure modules: config, commands, i18n, uploads and file
+delivery, markdown, reactions, SDK view formatting, plan router, streaming
+redaction, log LRU, bot factories, agent backends, the Graphiti proxy, the
+healthcheck, the session store, the SQLite message log + FTS search,
+questionnaire and AskUserQuestion rendering, and the task subsystem (schedule
+math, store, service, MCP task tool, runner script execution, scheduler
+dispatch/grace).
 
 Not deeply unit-tested: aiogram handler wiring, live agent SDK calls, Telegram
 Bot API integration, transcriber, album debouncer, and permission gate flows.

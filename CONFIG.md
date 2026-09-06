@@ -55,7 +55,7 @@ called without an explicit path, it tries `src/config/config.yaml`, then
 
 YAML configs may use `null`, but omitting optional fields is preferred.
 
-Recommended YAML sections are `gateway`, `agent`, and `providers`.
+Recommended YAML sections are `gateway`, `agent`, `providers`, and `tasks`.
 Legacy flat fields and older nested sections (`access`, `paths`, `streaming`,
 `voice`, `uploads`, `codex`, `pi`) are still accepted for compatibility.
 If the same field is set both flat and nested, startup fails.
@@ -135,6 +135,20 @@ Each section: type, default, semantics, valid values, related fields.
   change the model for an active chat.
 - **Examples:** `claude-sonnet-4-6`, `gpt-5.4`, `gpt-5.3-codex`,
   `openai/gpt-5.5`, `anthropic/claude-sonnet`.
+
+### `agent_dangerously_skip_permissions`
+
+- **Type:** `bool`.
+- **Default:** `false`.
+- **YAML key:** `agent.dangerously_skip_permissions`.
+- **Semantics:** Claude only. Runs the session with
+  `permission_mode="bypassPermissions"`, the SDK twin of
+  `claude --dangerously-skip-permissions`: every tool call is allowed and the
+  Telegram permission gate is skipped entirely. Scheduled LLM tasks follow
+  the same knob (see the `tasks` section).
+- **Use only** in an isolated or containerized run where the agent cannot
+  reach anything you would not let it touch. The Docker image sets
+  `IS_SANDBOX=1` because recent Claude CLIs refuse the flag as root otherwise.
 
 ### `codex_sandbox`
 
@@ -266,6 +280,20 @@ Each section: type, default, semantics, valid values, related fields.
 - **Tip:** raise above the slowest expected scenario. Plan mode + slow
   clicks easily exceed the previous 180s default; the bumped default is
   now 600s.
+
+### `agent_event_timeout_sec`
+
+- **Type:** `int`.
+- **Default:** `120`.
+- **YAML key:** `agent.event_timeout_sec`.
+- **Semantics:** maximum silence, in seconds, between two agent backend
+  events (text deltas, tool events, SDK messages) before the turn is treated
+  as stalled: the backend interrupts it and the bot replies with
+  `agent_stalled`. Any event resets the watchdog, so a long but chatty tool
+  call is fine; a wedged MCP or web-fetch call is not. Applies to all three
+  backends.
+- **Relation to `agent_timeout_sec`:** that one bounds the whole turn; this
+  one bounds the gap between events.
 
 ### `session_idle_ttl_sec`
 
@@ -435,6 +463,7 @@ brain:
     dir: ../../var/brain/tasks
     scripts_dir: ../../var/brain/scripts
     tick_interval_sec: 60
+    heartbeat_path: ../../var/brain/tasks/heartbeat
     max_output_chars: 4000
     script_timeout_sec: 300
     llm_timeout_sec: 7200
@@ -452,6 +481,10 @@ brain:
   paths are contained here (no traversal). Required for script tasks.
 - `tick_interval_sec` — how often the scheduler checks for due tasks. Default
   `60`.
+- `heartbeat_path` — file the scheduler rewrites on every tick with the
+  current timestamp. `python -m src.infra.healthcheck` reads it and exits `1`
+  when it is missing or older than 120 s; the Docker healthcheck relies on it.
+  Default `null` disables heartbeat writes. Resolved like `dir`.
 - `max_output_chars` — output truncation for delivery and history. Default
   `4000`.
 - `script_timeout_sec` — hard timeout for one script run. Default `300`.
@@ -588,7 +621,9 @@ brain:
     system_prompt: |
       You are a friendly Telegram assistant.
       Be concise.
+    dangerously_skip_permissions: false
     agent_timeout_sec: 600
+    event_timeout_sec: 120
     session_idle_ttl_sec: 86400
 
   providers:

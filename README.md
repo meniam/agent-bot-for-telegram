@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue.svg">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.14%2B-blue.svg">
   <img alt="aiogram" src="https://img.shields.io/badge/aiogram-3.29%2B-2CA5E0.svg">
   <img alt="Claude" src="https://img.shields.io/badge/Claude-Agent%20SDK-D77757.svg">
   <img alt="Codex" src="https://img.shields.io/badge/Codex-SDK-111111.svg">
@@ -66,6 +66,10 @@ Drop `*.md` files into `commands_dir` to expose reusable workflows (`/recall`, `
 | [CONFIG.md](CONFIG.md) | Every `BotConfig` field — type, default, validation, env override. |
 | [COMMANDS.md](COMMANDS.md) | Custom slash commands: frontmatter, `$ARGUMENTS`, examples. |
 | [docs/tasks.md](docs/tasks.md) | Scheduled task storage, scheduler/runner lifecycle, timeouts, and recovery. |
+| [docs/DOCKER.md](docs/DOCKER.md) | Running in Docker: image, mounts, Claude auth on macOS, Graphiti memory. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, runtime lifecycles, data flows, security boundaries. |
+| [docs/rich-messages.md](docs/rich-messages.md) | How Markdown becomes Telegram Rich Message HTML. |
+| [CHANGELOG.md](CHANGELOG.md) | What changed and when, newest day on top. |
 | [AGENTS.md](AGENTS.md) | Architecture reference for LLM agents working in this repo. |
 | [CLAUDE.md](CLAUDE.md) | Short orientation pinned to the repo for Claude Code. |
 

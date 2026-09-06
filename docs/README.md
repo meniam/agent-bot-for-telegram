@@ -8,3 +8,7 @@ working on the Telegram bot powered by Claude Agent SDK.
   permission gate, uploads, logging, tests, and extension points.
 - [tasks.md](tasks.md) - scheduled-task subsystem architecture: storage,
   scheduler/runner lifecycle, timeouts, restart recovery, access, and tests.
+- [DOCKER.md](DOCKER.md) - running in Docker: image, mounts, Claude auth on
+  macOS, provider switching, Graphiti knowledge-graph memory.
+- [rich-messages.md](rich-messages.md) - how Markdown replies become Telegram
+  Rich Message HTML: supported elements, drafts, fallbacks.

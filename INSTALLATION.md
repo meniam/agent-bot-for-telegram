@@ -86,6 +86,7 @@ brain:
 | `gateway.access.allowed_chat_ids` | Telegram chat IDs allowed to talk to the bot. Missing / `[]` → **fail-closed**, nobody is allowed. |
 | `gateway.access.blacklist_chat_ids` | Telegram chat IDs that are always denied. Wins over `allowed_for_all` and the whitelist. |
 | `gateway.logs_dir` | Root log directory. Omit for console only. |
+| `gateway.messages_dir` | Directory for per-chat SQLite message logs. Default `<logs_dir>/messages`. |
 | `gateway.commands_dir` | Directory with `*.md` files defining user slash commands. |
 | `gateway.draft_interval_sec` | Minimum seconds between draft-message updates while streaming. Default `0.2`. |
 | `gateway.approval_timeout_sec` | Seconds to wait for permission / plan / question button clicks. Default `300`. |
@@ -100,13 +101,16 @@ brain:
 | `agent.model` | Optional initial model id for the selected backend. Omit for SDK default. |
 | `agent.working_path` | Agent working directory. Omit for process cwd / SDK default. |
 | `agent.system_prompt` | System prompt for the selected agent. Omit for translation `default_system_prompt`. |
+| `agent.dangerously_skip_permissions` | Claude only: bypass the permission gate for every tool call. Default `false`; only for isolated runs. |
 | `agent.agent_timeout_sec` | Hard timeout per agent turn. Default `600`. |
+| `agent.event_timeout_sec` | Max silence between backend events before the turn is interrupted as stalled. Default `120`. |
 | `agent.session_idle_ttl_sec` | Idle TTL for a per-chat agent session. Default `86400`; `0` disables cleanup. |
 | `providers.codex.sandbox` | Codex sandbox preset: `read_only`, `workspace_write`, or `danger_full_access`. |
 | `providers.codex.approval_mode` | Initial Codex approval mode: `default`, `on_request`, `never`, or `full_auto`. |
 | `providers.pi.cli_bin` | Optional PI CLI path. Omit to find `pi` in `PATH`. |
 | `providers.pi.tools_mode` | Initial PI mode: `default`, `read_only`, or `no_tools`. |
 | `providers.pi.session_persistence` | Whether PI RPC should persist sessions. Default `false` starts with `--no-session`. |
+| `tasks.*` | Scheduled tasks, off by default. Every key is described in [CONFIG.md](CONFIG.md#scheduled-tasks-tasks-section). |
 
 `internal_name` is the top-level key (`brain` in the example). The log subdirectory is named after it.
 
@@ -137,7 +141,7 @@ uv run python -m src.bot   # or: just run, or .venv/bin/abt
 You should see in the console:
 
 ```
-INFO root: loaded 1 bot(s): brain
+INFO src.bot: loaded 1 bot(s): brain
 INFO bot.brain: [brain] starting as @YourBot
 INFO aiogram.dispatcher: Run polling for bot @YourBot ...
 ```
@@ -151,7 +155,9 @@ Open the bot in Telegram → `/start` → ask a question. The bot will:
 Commands (also visible in the Telegram `/` menu):
 
 - `/start` — greeting.
-- `/new` — start a fresh agent session (context dropped, armed `/plan` cleared, active quiz cancelled).
+- `/new` — start a fresh agent session (context dropped, armed `/plan` cleared, active quiz cancelled). The previous session stays in the `/sess` list.
+- `/sess` — list the chat's named sessions; `/sess <n>` switches to the n-th one.
+- `/task`, `/tasks` — schedule one-shot or recurring work and list active tasks. Shown only when the `tasks` section is enabled.
 - `/context` — show context-window usage (percentage, used / max tokens, model, top categories).
 - `/plan <task>` — engage the backend's plan mode for the chat and send the task. Claude uses `ExitPlanMode`; Codex receives a plan-first prompt under its selected sandbox/approval policy.
 - `/plan` (no args) — arm plan mode, the next text or voice message becomes the plan prompt.
