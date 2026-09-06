@@ -88,33 +88,32 @@ English.
 
 ## Run and Check
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-python -m src.bot
-# or
-abt
-```
-
-Expected green checks:
+The project runs on uv with a managed Python 3.14; `justfile` is the entry
+point and `just` lists the recipes.
 
 ```bash
-ruff check src/ tests/
-mypy src/ tests/ --strict
-pyright src/ tests/
-bandit -r src/ -q
-pip-audit --strict
-pytest -q
+uv sync --locked          # .venv with deps + dev tools from uv.lock
+just run                  # uv run python -m src.bot
 ```
 
-After significant Python changes, also run:
+The gate, run before every commit:
 
 ```bash
-find src -name '*.py' -not -path '*/__pycache__/*' -print0 | xargs -0 python -m py_compile
-pytest -q
+just ci                   # = just lint + just test
 ```
+
+which expands to
+
+```bash
+uv run --locked ruff check --no-fix .
+uv run --locked ruff format --check .
+uv run --locked mypy --no-incremental
+uv run --locked pytest -q
+```
+
+`just fix` applies safe ruff fixes and formats (read the diff); `just audit`
+runs `pip-audit` over the locked dependency export via `uvx`. Never run
+`ruff --unsafe-fixes` as an agent. Tool caches live under `var/cache/`.
 
 For behavior that unit tests do not cover, run the bot and inspect
 `logs/<internal_name>/bot.log` plus the relevant per-chat `<chat_id>.log`.
@@ -356,10 +355,16 @@ Validate those manually when touched.
 - Keep `bot.py` as wiring and supervision only.
 - Docstrings (English): **every** symbol is documented — module, class,
   function, method, `__init__`, magic method, and private `_` / nested helpers.
-  ruff's `D` (pydocstyle, `pep257` convention) enforces this for public symbols
+  ruff's `D` (pydocstyle, `google` convention) enforces this for public symbols
   and modules; private/nested ones are not linter-gated but are still required
   (keep them to one honest imperative line). Style: imperative summary ("Build…"
   not "Builds…"), a blank line after a multi-line summary, ends with a period.
+  A multi-line docstring documents its contract in Google sections: `Returns:`,
+  `Raises:` (only exceptions the function raises itself; propagated ones go in
+  prose), `Yields:`. The `DOC*` rules check them against the body.
+- Lint suppressions carry the rule code and a reason:
+  `# noqa: S603  # cmd is a literal list`. Bare `# noqa` fails `PGH004`.
+  `# type: ignore` always names the error code.
   Explain *why* for non-obvious control flow (locks, GC, grace windows,
   Deny-shaped tool results); for trivial symbols a single accurate line is
   enough — never restate the signature as filler. If a docstring and the code

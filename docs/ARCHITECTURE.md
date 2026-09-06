@@ -401,7 +401,7 @@ Gate routing:
 - Deny;
 - Always allow this session.
 
-Request state lives in `_pending`:
+Request state lives in `pending`:
 
 ```text
 request_id -> (future, tool_name, expected_chat_id, prompt_message_id)
@@ -448,7 +448,7 @@ Flow:
 4. Reject returns a deny message and keeps Claude in plan mode.
 5. Any text while the prompt is active is treated as rejection with feedback.
 
-State lives in `_plan_pending`:
+State lives in `plan_pending`:
 
 ```text
 chat_id -> (future, request_id, prompt_message_id)
@@ -741,8 +741,7 @@ Not fully covered by unit tests:
 Recommended checks for significant changes:
 
 ```bash
-find src -name '*.py' -not -path '*/__pycache__/*' -print0 | xargs -0 python -m py_compile
-pytest -q
+just ci
 ```
 
 For integration-heavy changes, also run the bot and verify the affected
@@ -771,7 +770,7 @@ Telegram scenario by reading `logs/<internal_name>/bot.log` and
    `ui/tool_status.py`.
 4. Store pending state with request ID and expected chat ID.
 5. Delete stale prompts on click and timeout.
-6. Log decisions through `gate._cl(chat_id)`.
+6. Log decisions through `gate.chat_log(chat_id)`.
 
 ### New External Integration
 

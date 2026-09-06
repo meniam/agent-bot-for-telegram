@@ -5,7 +5,8 @@ Python Telegram bot that talks to Claude, Codex, or PI.dev through agent backend
 ## Requirements
 
 - **macOS / Linux** (Windows is not tested).
-- **Python 3.11+** (matches `pyproject.toml`; 3.11 / 3.12 / 3.14 recommended).
+- **[uv](https://docs.astral.sh/uv/)** — installs the project, its locked dependencies and a managed **Python 3.14** (`requires-python` in `pyproject.toml`; no system Python needed).
+- **[just](https://github.com/casey/just)** (optional) — runs the check recipes (`just ci`).
 - **Node.js 18+** — needed once to install the Claude Code CLI and run `claude login`. The Claude SDK ships a bundled `claude` for runtime use.
 - A **Telegram** account and a bot token from [@BotFather](https://t.me/BotFather).
 - A **Claude / Max / Team** subscription ([claude login](https://docs.anthropic.com/en/docs/claude-code/setup)) **or** an API key from [console.anthropic.com](https://console.anthropic.com/) when using `agent_provider="claude"`.
@@ -52,9 +53,7 @@ Keep the Telegram bot token secret — it lives in `src/config/config.yaml`, whi
 git clone <repo-url> abt
 cd abt
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"   # pyproject.toml is the source of truth; [dev] adds ruff/mypy/pytest/bandit/pip-audit
+uv sync --locked          # creates .venv with Python 3.14, installs deps + dev tools (ruff/mypy/pytest) from uv.lock
 ```
 
 ## 4. Create the config
@@ -132,8 +131,7 @@ research:
 ## 5. Run
 
 ```bash
-source .venv/bin/activate
-python -m src.bot
+uv run python -m src.bot   # or: just run, or .venv/bin/abt
 ```
 
 You should see in the console:
@@ -432,7 +430,8 @@ abt/
 ├── logs/                       # auto-created when logs_dir is set
 ├── uploads/                    # auto-created when uploads_dir is set
 ├── pyproject.toml              # build, deps, ruff/mypy/pytest config; [project.scripts] abt
-├── requirements.txt            # legacy mirror of pyproject runtime deps
+├── uv.lock                     # exact dependency versions; `uv sync --locked` installs from it
+├── justfile                    # check recipes: just lint / test / ci / audit / run
 ├── AGENTS.md                   # full project guide for LLMs
 ├── CONFIG.md                   # per-field config reference
 ├── COMMANDS.md                 # custom slash-command reference
@@ -446,9 +445,11 @@ abt/
 
 ```bash
 git pull
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --locked
 ```
+
+Coming from an older checkout that used `python3 -m venv` + `pip install`: delete
+the old environment first (`rm -rf .venv`), then `uv sync --locked`.
 
 Restart the process so changes take effect.
 

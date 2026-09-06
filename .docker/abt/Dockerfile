@@ -6,12 +6,17 @@
 #   - codex   -> npm @openai/codex               (ships a platform binary)
 # All three are Node-based or Node-installed, so Node lives in the image and
 # Python drives them over subprocess/SDK.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
+# UV_PYTHON_PREFERENCE overrides the project's `only-managed` (pyproject.toml):
+# inside the image the interpreter is the one the base image ships, uv must
+# not download another. The venv goes first on PATH so `python` in CMD and in
+# the compose healthcheck is the project interpreter.
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DEFAULT_TIMEOUT=120 \
-    PIP_RETRIES=5 \
+    UV_PYTHON_PREFERENCE=only-system \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH" \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
 # Node 22 LTS + the tools the agents shell out to: git for repo ops,
@@ -40,14 +45,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# Install Python deps first for layer caching, then the editable package.
-# Editable keeps `src` importable from /app so a bind-mounted config at
-# /app/src/config/config.yaml is the one the loader reads (CONFIG_DIR is
-# resolved from src/config/__init__.py).
-COPY pyproject.toml README.md LICENSE ./
+# Install locked runtime deps first for layer caching, then the project.
+# `uv sync` installs the project editable, which keeps `src` importable from
+# /app so a bind-mounted config at /app/src/config/config.yaml is the one the
+# loader reads (CONFIG_DIR is resolved from src/config/__init__.py).
+COPY pyproject.toml uv.lock .python-version README.md LICENSE ./
+RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 COPY .agents ./.agents
-RUN pip install -e .
+RUN uv sync --locked --no-dev
 
 COPY .docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

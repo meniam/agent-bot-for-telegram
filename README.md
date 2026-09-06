@@ -37,8 +37,7 @@
 
 ```bash
 git clone <repo-url> abt && cd abt
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --locked                                   # Python 3.14 (uv-managed) + deps + dev tools
 
 claude login                                       # for agent_provider="claude"
 # Codex backend uses openai-codex / Codex auth when agent_provider="codex"
@@ -46,7 +45,7 @@ claude login                                       # for agent_provider="claude"
 cp src/config/config.example.yaml src/config/config.yaml
 # edit: gateway.telegram_bot_token + gateway.access.allowed_chat_ids + agent.provider
 
-python -m src.bot                                  # or: abt
+uv run python -m src.bot                           # or: just run
 ```
 
 Don't know your `chat_id`? Leave `allowed_chat_ids: []`, message the bot — the refusal contains it. Add it back, restart.
@@ -74,7 +73,7 @@ Drop `*.md` files into `commands_dir` to expose reusable workflows (`/recall`, `
 
 [aiogram 3](https://docs.aiogram.dev/) · [claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-python) · [openai-codex](https://developers.openai.com/codex/sdk) · [pydantic 2](https://docs.pydantic.dev/) · [markdown-it-py](https://pypi.org/project/markdown-it-py/) · Groq Whisper.
 
-Full deps + dev tooling (`ruff`, `mypy`, `pyright`, `bandit`, `pip-audit`, `pytest`) declared in [pyproject.toml](pyproject.toml).
+Deps and dev tooling (`ruff`, `mypy`, `pytest`) are declared in [pyproject.toml](pyproject.toml) and locked in `uv.lock`; `just` lists the check recipes (`just ci`).
 
 ## 📄 License
 

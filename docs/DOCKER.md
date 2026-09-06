@@ -6,9 +6,10 @@ state) come in as mounts — nothing secret is baked into the image.
 
 ## Files
 
-- [.docker/abt/Dockerfile](../.docker/abt/Dockerfile) — Python 3.12 + Node 22 +
+- [.docker/abt/Dockerfile](../.docker/abt/Dockerfile) — Python 3.14 + Node 22 +
   npm globals (`@anthropic-ai/claude-code`, `@earendil-works/pi-coding-agent`,
-  `@openai/codex`), editable install of the project.
+  `@openai/codex`), project installed by `uv sync --locked --no-dev` from
+  `uv.lock` into `/app/.venv` (editable, first on `PATH`).
 - [.docker/docker-entrypoint.sh](../.docker/docker-entrypoint.sh) — pre-creates
   the state dirs (`commands_dir` must exist; the loader does not create it). Runs
   at runtime, not build, because `/app/var` is a bind mount that shadows

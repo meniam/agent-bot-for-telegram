@@ -36,13 +36,16 @@ test *args:
 ci: lint test
 
 # Dependency CVE audit of the locked runtime + dev set via pip-audit.
+# `--disable-pip`: the export is fully pinned with hashes, so pip-audit needs no
+# resolver venv; with a uv-managed Python that venv aborts on macOS
+# (see .agents/learnings/).
 audit:
     #!/usr/bin/env zsh
     set -eu
     audit_requirements=$(mktemp)
     trap 'rm -f "$audit_requirements"' EXIT
     uv export --locked --format requirements-txt --all-groups --no-emit-project --output-file "$audit_requirements"
-    uvx pip-audit -r "$audit_requirements"
+    uvx pip-audit --disable-pip -r "$audit_requirements"
 
 # Run the bot from the project environment.
 run:

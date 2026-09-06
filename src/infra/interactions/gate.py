@@ -71,8 +71,10 @@ class TelegramInteractionGate:
     `can_use_tool` is the single entry point the backend calls per tool use; it
     routes the four special tools to their flow modules and everything else to
     the generic Allow/Deny/Always prompt. The gate owns the in-flight prompt
-    registries (`_pending`, `_aq`, `_plan_pending`); the flows themselves live
-    in sibling modules and mutate that state through free functions.
+    registries (`pending`, `aq`, `plan_pending`); the flows themselves live in
+    sibling modules and mutate that state through free functions. The public
+    attributes and the `chat_log` / `delete_prompt` / `format_request` helpers
+    exist for those flow modules, not for callers outside `interactions/`.
     """
 
     def __init__(

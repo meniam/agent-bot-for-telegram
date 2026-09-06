@@ -150,9 +150,5 @@ persisted `running` state is the source of truth across restarts.
 For significant task changes, run:
 
 ```bash
-ruff check src/ tests/
-mypy src/ tests/ --strict
-pyright src/ tests/
-pytest -q
-find src -name '*.py' -not -path '*/__pycache__/*' -print0 | xargs -0 python -m py_compile
+just ci
 ```
