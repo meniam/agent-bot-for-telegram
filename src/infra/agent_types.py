@@ -44,11 +44,11 @@ class EphemeralResult:
     errors: list[str] = field(default_factory=list)
 
 
-class AgentTurnReset(RuntimeError):
+class AgentTurnResetError(RuntimeError):
     """Raised when an in-flight agent turn is intentionally reset."""
 
 
-class AgentEventStreamTimeout(RuntimeError):
+class AgentEventStreamTimeoutError(RuntimeError):
     """Raised when an agent backend stops emitting progress events."""
 
 
@@ -83,8 +83,8 @@ class AgentBackend(Protocol):
         """Run one turn, yielding reply chunks as they stream.
 
         An async generator despite the non-``async`` signature (Protocol quirk).
-        Holds the per-chat lock for the whole turn. May raise ``AgentTurnReset``
-        if the session is reset mid-turn or ``AgentEventStreamTimeout`` if the
+        Holds the per-chat lock for the whole turn. May raise ``AgentTurnResetError``
+        if the session is reset mid-turn or ``AgentEventStreamTimeoutError`` if the
         backend stops emitting progress.
         """
         ...

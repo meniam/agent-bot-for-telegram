@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src.config import BotConfig
-from src.infra.agent_types import AgentEventStreamTimeout, EphemeralResult
+from src.infra.agent_types import AgentEventStreamTimeoutError, EphemeralResult
 from src.infra.task_logging import attach_task_log, redact, task_log_context
 from src.infra.task_runner import TaskRunner, broadcast_targets
 from src.infra.task_store import TaskStore, new_task_id
@@ -95,7 +95,7 @@ def _script_task(name: str, chat_id: int = 10, scope: str = "user") -> Task:
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
-        scope=scope,  # type: ignore[arg-type]
+        scope=scope,
         kind="script",
         script=name,
         schedule=TaskSchedule(kind="once", run_at=datetime(2026, 1, 1, tzinfo=UTC)),
@@ -371,7 +371,7 @@ async def test_llm_idle_timeout_is_recorded_and_clears_live_log(
             assert idle_timeout_sec == 123
             if on_session_path is not None:
                 on_session_path("/live/idle.jsonl")
-            raise AgentEventStreamTimeout("silent")
+            raise AgentEventStreamTimeoutError("silent")
 
     runner = TaskRunner(
         deliver=bot.deliver,

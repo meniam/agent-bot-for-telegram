@@ -55,6 +55,8 @@ from .ui.plan_router import PlanRouter
 from .ui.reactions import ReactionPicker
 from .ui.tool_status import ToolStatusMirror
 
+log = logging.getLogger(__name__)
+
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / "var" / "sessions"
 
 
@@ -412,7 +414,7 @@ async def _supervise(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logging.exception("[%s] crashed, restarting in %.1fs", cfg.name, backoff)
+            log.exception("[%s] crashed, restarting in %.1fs", cfg.name, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
 
@@ -421,7 +423,7 @@ async def main() -> None:
     """Load the config and supervise every configured bot concurrently."""
     setup_console()
     bots = load_config()
-    logging.info("loaded %d bot(s): %s", len(bots), ", ".join(bots.keys()))
+    log.info("loaded %d bot(s): %s", len(bots), ", ".join(bots.keys()))
 
     http = aiohttp.ClientSession()
     try:
@@ -433,7 +435,7 @@ async def main() -> None:
         # bug we want to see, not swallow.
         for name, result in zip(bots.keys(), results, strict=True):
             if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
-                logging.error("[%s] supervisor exited with %s", name, repr(result))
+                log.error("[%s] supervisor exited with %s", name, repr(result))
     finally:
         await http.close()
 

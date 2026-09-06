@@ -53,12 +53,9 @@ class BaseAgentBackend:
     async def _gc_loop(self) -> None:
         """Sweep idle sessions on a derived interval until cancelled."""
         interval = max(min(self._idle_ttl / 4, 60.0), 5.0)
-        try:
-            while True:
-                await asyncio.sleep(interval)
-                await self._gc_idle()
-        except asyncio.CancelledError:
-            raise
+        while True:
+            await asyncio.sleep(interval)
+            await self._gc_idle()
 
     def _stale_chat_ids(self, last_used: dict[int, float]) -> list[int]:
         """Chat ids idle past the TTL whose lock is free (skip in-flight turns)."""

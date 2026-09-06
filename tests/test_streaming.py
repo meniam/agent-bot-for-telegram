@@ -89,8 +89,9 @@ async def test_stream_empty_chunks() -> None:
 
     async def _chunks() -> AsyncGenerator[StreamChunk]:
         """Yield no chunks."""
-        return
-        yield StreamChunk(kind="text", text="")
+        chunks: tuple[StreamChunk, ...] = ()
+        for chunk in chunks:
+            yield chunk
 
     result = await streamer.stream(42, _chunks())
     assert result == ""

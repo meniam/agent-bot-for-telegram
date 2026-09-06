@@ -36,18 +36,18 @@ async def handle(
 ) -> PermissionResultAllow | PermissionResultDeny:
     """Prompt the user with Allow/Deny/Always buttons and await the verdict.
 
-    Registers the request in ``gate._pending`` keyed by a fresh id, sends the
+    Registers the request in ``gate.pending`` keyed by a fresh id, sends the
     inline keyboard, then blocks on the future until `on_callback` resolves it
     or the timeout fires (timeout → deny, prompt deleted). "Always" returns an
     Allow carrying a session-scoped `addRules` permission update.
     """
-    t = gate._t
+    t = gate.t
     request_id = secrets.token_hex(8)
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[str] = loop.create_future()
-    gate._pending[request_id] = (fut, tool_name, chat_id, None)
+    gate.pending[request_id] = (fut, tool_name, chat_id, None)
 
-    text = gate._format_request(tool_name, tool_input, ctx)
+    text = gate.format_request(tool_name, tool_input, ctx)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -70,24 +70,24 @@ async def handle(
     )
 
     try:
-        sent = await gate._bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)
+        sent = await gate.bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)
     except Exception:
         log.exception("permission prompt failed")
-        gate._pending.pop(request_id, None)
+        gate.pending.pop(request_id, None)
         return PermissionResultDeny(message=t.t("permission_failed_prompt"))
-    gate._pending[request_id] = (fut, tool_name, chat_id, sent.message_id)
+    gate.pending[request_id] = (fut, tool_name, chat_id, sent.message_id)
 
     decision = "deny"
     try:
-        decision = await asyncio.wait_for(fut, timeout=gate._timeout)
+        decision = await asyncio.wait_for(fut, timeout=gate.timeout)
     except TimeoutError:
         # Drop the stale prompt before announcing the timeout so the chat
         # does not keep an orphaned set of buttons around.
-        await gate._delete_prompt(chat_id, sent.message_id)
+        await gate.delete_prompt(chat_id, sent.message_id)
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(chat_id, t.t("approval_timeout"), parse_mode=None)
+            await gate.bot.send_message(chat_id, t.t("approval_timeout"), parse_mode=None)
     finally:
-        gate._pending.pop(request_id, None)
+        gate.pending.pop(request_id, None)
 
     if decision == "always":
         return PermissionResultAllow(
@@ -111,7 +111,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
     Validates freshness and chat ownership, sets the decision, and deletes the
     prompt. No-op for stale or cross-chat callbacks.
     """
-    t = gate._t
+    t = gate.t
     data = callback.data or ""
     if not data.startswith("perm:"):
         return
@@ -123,7 +123,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
 
     msg = callback.message if isinstance(callback.message, Message) else None
 
-    entry = gate._pending.get(request_id)
+    entry = gate.pending.get(request_id)
     if entry is None or entry[0].done():
         await callback.answer(t.t("callback_outdated"), show_alert=False)
         # Outdated prompt — delete it so the chat does not accumulate
@@ -146,7 +146,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
         return
 
     fut.set_result(decision)
-    gate._cl(expected_chat_id).info(
+    gate.chat_log(expected_chat_id).info(
         "permission %s for tool %r (request %s)",
         decision,
         _tool_name,

@@ -59,7 +59,7 @@ def test_scan_passes_benign() -> None:
 
 def test_scan_rejects_invisible_unicode() -> None:
     """Verify scan_prompt flags invisible Unicode control characters."""
-    assert scan_prompt("remind me‮evil") is not None
+    assert scan_prompt("remind me\u202eevil") is not None
 
 
 # ----- create --------------------------------------------------------------

@@ -23,8 +23,8 @@ def _task(
     return Task(
         id=new_task_id(),
         owner_chat_id=chat_id,
-        scope=scope,  # type: ignore[arg-type]
-        kind=kind,  # type: ignore[arg-type]
+        scope=scope,
+        kind=kind,
         prompt="x",
         enabled=enabled,
         schedule=TaskSchedule(kind="interval", interval_sec=1800),
@@ -163,9 +163,9 @@ async def test_history_append_and_prune(tmp_path: Path) -> None:
 async def test_unsafe_task_id_rejected(tmp_path: Path) -> None:
     """An unsafe task id is rejected on history lookup and on add."""
     store = TaskStore(tmp_path)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsafe task id"):
         await store.list_history("../escape")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsafe task id"):
         await store.add(_bad_id_task())
 
 

@@ -21,8 +21,8 @@ from typing import Any, Protocol, cast
 
 from .agent_base import BaseAgentBackend
 from .agent_types import (
-    AgentEventStreamTimeout,
-    AgentTurnReset,
+    AgentEventStreamTimeoutError,
+    AgentTurnResetError,
     EphemeralResult,
     StreamChunk,
     ToolEventCallback,
@@ -332,18 +332,17 @@ class PiAgentBackend(BaseAgentBackend):
 
     async def ask(self, chat_id: int, prompt: str) -> str:
         """Run one turn and return the full reply text (drains ``ask_stream``)."""
-        chunks: list[str] = []
-        async for chunk in self.ask_stream(chat_id, prompt):
-            if chunk.kind == "text":
-                chunks.append(chunk.text)
+        chunks = [
+            chunk.text async for chunk in self.ask_stream(chat_id, prompt) if chunk.kind == "text"
+        ]
         return "".join(chunks).strip() or "(empty response)"
 
     async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
         """Run one turn under the per-chat lock, yielding assistant text deltas.
 
         Extracts inline images, watchdogs the event stream, and falls back to the
-        last assistant text when no delta arrived. Raises ``AgentTurnReset`` on a
-        mid-turn reset or ``AgentEventStreamTimeout`` if the stream stalls.
+        last assistant text when no delta arrived. Raises ``AgentTurnResetError`` on a
+        mid-turn reset or ``AgentEventStreamTimeoutError`` if the stream stalls.
         """
         async with self._lock(chat_id):
             session = await self._get_session(chat_id)
@@ -377,7 +376,7 @@ class PiAgentBackend(BaseAgentBackend):
                     event_type = str(event.get("type") or "")
                     log.info("PI event chat_id=%s type=%s", chat_id, event_type)
                     if event_type == "rpc_closed":
-                        raise AgentTurnReset("PI RPC session reset")
+                        raise AgentTurnResetError("PI RPC session reset")
                     delta = await self._handle_event(chat_id, event)
                     if delta:
                         saw_delta = True
@@ -404,7 +403,7 @@ class PiAgentBackend(BaseAgentBackend):
 
         On ``PI_EVENT_TIMEOUT_SEC`` with no event it emits a post lifecycle
         event, best-effort sends ``abort_bash``/``abort`` to stop the run, and
-        raises ``AgentEventStreamTimeout``.
+        raises ``AgentEventStreamTimeoutError``.
         """
         try:
             return await asyncio.wait_for(
@@ -428,7 +427,7 @@ class PiAgentBackend(BaseAgentBackend):
                 await session.transport.request({"type": "abort_bash"})
             with contextlib.suppress(Exception):
                 await session.transport.request({"type": "abort"})
-            raise AgentEventStreamTimeout(msg) from None
+            raise AgentEventStreamTimeoutError(msg) from None
 
     async def _emit_lifecycle(
         self,
@@ -808,7 +807,7 @@ class PiAgentBackend(BaseAgentBackend):
         if session.commands is not None:
             return session.commands
         response = await self._request_optional(session, {"type": "get_commands"})
-        commands = response.get("commands") if isinstance(response, dict) else None
+        commands = response.get("commands")
         session.commands = (
             [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
         )
@@ -823,7 +822,7 @@ class PiAgentBackend(BaseAgentBackend):
         if session.models is not None:
             return session.models
         response = await self._request_optional(session, {"type": "get_available_models"})
-        raw_models = response.get("models") if isinstance(response, dict) else None
+        raw_models = response.get("models")
         models: list[tuple[str, str]] = [("", "")]
         if isinstance(raw_models, list):
             for item in raw_models:

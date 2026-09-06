@@ -19,8 +19,8 @@ from typing import Any, NoReturn
 
 from .agent_base import BaseAgentBackend
 from .agent_types import (
-    AgentEventStreamTimeout,
-    AgentTurnReset,
+    AgentEventStreamTimeoutError,
+    AgentTurnResetError,
     EphemeralResult,
     StreamChunk,
     ToolEventCallback,
@@ -282,18 +282,17 @@ class CodexAgentBackend(BaseAgentBackend):
 
     async def ask(self, chat_id: int, prompt: str) -> str:
         """Run one turn and return the full reply text (drains ``ask_stream``)."""
-        chunks: list[str] = []
-        async for chunk in self.ask_stream(chat_id, prompt):
-            if chunk.kind == "text":
-                chunks.append(chunk.text)
+        chunks = [
+            chunk.text async for chunk in self.ask_stream(chat_id, prompt) if chunk.kind == "text"
+        ]
         return "".join(chunks).strip() or "(empty response)"
 
     async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
         """Run one turn under the per-chat lock, yielding the final response text.
 
         Mirrors tool lifecycle events through the callback. Raises
-        ``AgentTurnReset`` if the session is reset mid-turn or
-        ``AgentEventStreamTimeout`` if the run stalls.
+        ``AgentTurnResetError`` if the session is reset mid-turn or
+        ``AgentEventStreamTimeoutError`` if the run stalls.
         """
         async with self._lock(chat_id):
             thread = await self._get_thread(chat_id)
@@ -317,7 +316,7 @@ class CodexAgentBackend(BaseAgentBackend):
                 )
                 result = await self._wait_for_turn(chat_id, turn)
                 if chat_id not in self._sessions:
-                    raise AgentTurnReset("Codex session reset")
+                    raise AgentTurnResetError("Codex session reset")
                 text = self._extract_final_response(result)
                 await self._emit_result_tool_events(chat_id, result)
                 await self._emit_lifecycle(
@@ -346,7 +345,7 @@ class CodexAgentBackend(BaseAgentBackend):
 
         Awaitable turns are bounded by ``CODEX_RUN_TIMEOUT_SEC``; on timeout it
         emits a post lifecycle event, cancels the turn, and raises
-        ``AgentEventStreamTimeout``.
+        ``AgentEventStreamTimeoutError``.
         """
         if hasattr(turn, "stream"):
             return await self._wait_for_streamed_turn(chat_id, turn)
@@ -366,7 +365,7 @@ class CodexAgentBackend(BaseAgentBackend):
                 model=session.model if session else self._initial_model,
             )
             await self._cancel_turn(turn)
-            raise AgentEventStreamTimeout(msg) from None
+            raise AgentEventStreamTimeoutError(msg) from None
 
     async def _wait_for_streamed_turn(self, chat_id: int, turn: Any) -> dict[str, Any]:
         """Drain a streamed turn into a result dict, normalizing SDK events.
@@ -374,7 +373,7 @@ class CodexAgentBackend(BaseAgentBackend):
         Each event is mirrored as an app-server notification, then accumulated:
         completed items, token usage, and the terminal ``turn/completed``. Per
         event ``wait_for`` enforces ``CODEX_RUN_TIMEOUT_SEC``; a mid-turn reset
-        raises ``AgentTurnReset`` and a ``failed`` turn raises ``RuntimeError``.
+        raises ``AgentTurnResetError`` and a ``failed`` turn raises ``RuntimeError``.
         The stream is always closed in ``finally``.
         """
         stream = turn.stream()
@@ -416,7 +415,7 @@ class CodexAgentBackend(BaseAgentBackend):
                     completed = payload["turn"]
                     break
                 if chat_id not in self._sessions:
-                    raise AgentTurnReset("Codex session reset")
+                    raise AgentTurnResetError("Codex session reset")
         finally:
             closer = getattr(stream, "aclose", None)
             if closer is not None:
@@ -439,7 +438,7 @@ class CodexAgentBackend(BaseAgentBackend):
     async def _handle_turn_timeout(self, chat_id: int, turn: Any) -> NoReturn:
         """Log/emit a stalled-stream timeout, cancel the turn, and always raise.
 
-        Raises ``AgentEventStreamTimeout``; called when a streamed turn's next
+        Raises ``AgentEventStreamTimeoutError``; called when a streamed turn's next
         event does not arrive within ``CODEX_RUN_TIMEOUT_SEC``.
         """
         msg = f"Codex run timed out after {self._event_timeout:.0f}s waiting for completion"
@@ -453,7 +452,7 @@ class CodexAgentBackend(BaseAgentBackend):
             model=session.model if session else self._initial_model,
         )
         await self._cancel_turn(turn)
-        raise AgentEventStreamTimeout(msg) from None
+        raise AgentEventStreamTimeoutError(msg) from None
 
     async def _cancel_turn(self, turn: Any) -> None:
         """Stop a turn via the first available ``interrupt``/``cancel``/``close``."""

@@ -43,7 +43,7 @@ async def handle(
     returns a Deny-shaped result whose message *is* the answer summary — the SDK
     feeds it back to the model as the tool result. Timeout → "no response".
     """
-    t = gate._t
+    t = gate.t
     questions = tool_input.get("questions") or []
     if not isinstance(questions, list) or not questions:
         return PermissionResultDeny(message="AskUserQuestion called with no questions.")
@@ -51,15 +51,17 @@ async def handle(
     collected: list[tuple[str, list[str] | None]] = []
     # Fresh start for this turn — drop any leftover abort flag from a
     # superseded prompt that already completed.
-    gate._aq_aborted.discard(chat_id)
+    gate.aq_aborted.discard(chat_id)
     try:
         for qidx, q in enumerate(questions):
-            if chat_id in gate._aq_aborted:
+            if chat_id in gate.aq_aborted:
                 # User sent a new message mid-prompt; mark remaining
                 # questions as skipped so Claude knows what's missing.
-                for remaining in questions[qidx:]:
-                    if isinstance(remaining, dict):
-                        collected.append((str(remaining.get("question", "")), None))
+                collected.extend(
+                    (str(remaining.get("question", "")), None)
+                    for remaining in questions[qidx:]
+                    if isinstance(remaining, dict)
+                )
                 break
             if not isinstance(q, dict):
                 continue
@@ -67,7 +69,7 @@ async def handle(
                 answers = await _ask_one(gate, chat_id, qidx, len(questions), q)
             except TimeoutError:
                 with contextlib.suppress(Exception):
-                    await gate._bot.send_message(chat_id, t.t("aq_timeout"), parse_mode=None)
+                    await gate.bot.send_message(chat_id, t.t("aq_timeout"), parse_mode=None)
                 return PermissionResultDeny(
                     message=(
                         "User did not answer the AskUserQuestion prompt in time. "
@@ -81,10 +83,10 @@ async def handle(
                 )
             collected.append((str(q.get("question", "")), answers))
     finally:
-        gate._aq_aborted.discard(chat_id)
+        gate.aq_aborted.discard(chat_id)
 
     summary = _format_answers(collected)
-    gate._cl(chat_id).info(
+    gate.chat_log(chat_id).info(
         "AskUserQuestion final: %s",
         summary.replace("\n", " ⏎ ")[:600],
     )
@@ -100,14 +102,14 @@ async def _ask_one(
 ) -> list[str] | None:
     """Render one question's keyboard and await the pick.
 
-    Registers an `_AQSession` in ``gate._aq`` keyed by a token embedded in
+    Registers an `_AQSession` in ``gate.aq`` keyed by a token embedded in
     callback_data; `on_callback` mutates its selection and resolves the future.
     Returns the chosen labels, or None for Skip/abort. Raises `TimeoutError`
-    when the user does not answer within ``gate._timeout``.
+    when the user does not answer within ``gate.timeout``.
     """
     from .gate import _AQSession
 
-    t = gate._t
+    t = gate.t
     text = question.get("question") or ""
     header = question.get("header") or ""
     options = question.get("options") or []
@@ -125,7 +127,7 @@ async def _ask_one(
 
     def build_text() -> str:
         """Build the visible question body with full option labels."""
-        session = gate._aq.get(request_id)
+        session = gate.aq.get(request_id)
         selected: set[int] = session.selected if session is not None else set()
         body_lines = [
             prefix,
@@ -135,13 +137,13 @@ async def _ask_one(
         ]
         if multi:
             body_lines.append(t.t("aq_pick_multi"))
-        return "\n".join(line for line in body_lines if line is not None)
+        return "\n".join(body_lines)
 
     # Build a compact numeric keyboard. Full option text lives in the message
     # body so long labels wrap normally instead of being squeezed into buttons.
     def build_kb() -> InlineKeyboardMarkup:
         """Build the options keyboard, redrawing checkmarks from current selection."""
-        session = gate._aq.get(request_id)
+        session = gate.aq.get(request_id)
         selected: set[int] = session.selected if session is not None else set()
         rows: list[list[InlineKeyboardButton]] = []
         option_buttons: list[InlineKeyboardButton] = []
@@ -172,11 +174,11 @@ async def _ask_one(
         rows.append(footer)
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    sent = await gate._bot.send_message(
+    sent = await gate.bot.send_message(
         chat_id, build_text(), reply_markup=build_kb(), parse_mode=None
     )
 
-    gate._aq[request_id] = _AQSession(
+    gate.aq[request_id] = _AQSession(
         fut=fut,
         options=options,
         multi=multi,
@@ -187,10 +189,10 @@ async def _ask_one(
     )
 
     try:
-        picked_idx = await asyncio.wait_for(fut, timeout=gate._timeout)
+        picked_idx = await asyncio.wait_for(fut, timeout=gate.timeout)
     finally:
-        gate._aq.pop(request_id, None)
-        await gate._delete_prompt(chat_id, sent.message_id)
+        gate.aq.pop(request_id, None)
+        await gate.delete_prompt(chat_id, sent.message_id)
 
     if picked_idx is None:
         return None
@@ -224,7 +226,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
     (single-select); Done resolves with the current selection; Skip resolves
     with None. No-op for stale or cross-chat callbacks.
     """
-    t = gate._t
+    t = gate.t
     data = callback.data or ""
     if not data.startswith("aq:"):
         return
@@ -234,7 +236,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
         await callback.answer()
         return
 
-    session = gate._aq.get(request_id)
+    session = gate.aq.get(request_id)
     if session is None or session.fut.done():
         await callback.answer(t.t("callback_outdated"), show_alert=False)
         msg = callback.message if isinstance(callback.message, Message) else None
@@ -243,7 +245,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
                 await msg.delete()
         return
 
-    if callback.from_user is None or callback.message is None:
+    if callback.message is None:
         await callback.answer()
         return
     actual_chat_id = callback.message.chat.id if isinstance(callback.message, Message) else None
@@ -261,13 +263,13 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
             for i in picked
             if 0 <= i < len(session.options)
         ]
-        gate._cl(session.chat_id).info("AskUserQuestion (multi) picked: %s", picks)
+        gate.chat_log(session.chat_id).info("AskUserQuestion (multi) picked: %s", picks)
         session.fut.set_result(picked)
         await callback.answer(t.t("callback_received"))
         return
 
     if action == "skip":
-        gate._cl(session.chat_id).info("AskUserQuestion: skipped")
+        gate.chat_log(session.chat_id).info("AskUserQuestion: skipped")
         session.fut.set_result(None)
         await callback.answer(t.t("aq_skipped"))
         return
@@ -283,7 +285,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
 
     if not session.multi:
         label = str(session.options[idx].get("label", ""))
-        gate._cl(session.chat_id).info("AskUserQuestion picked: %r", label)
+        gate.chat_log(session.chat_id).info("AskUserQuestion picked: %r", label)
         session.fut.set_result([idx])
         await callback.answer(t.t("callback_received"))
         return
@@ -294,7 +296,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
     else:
         session.selected.add(idx)
     try:
-        await gate._bot.edit_message_text(
+        await gate.bot.edit_message_text(
             chat_id=session.chat_id,
             message_id=session.message_id,
             text=session.build_text(),

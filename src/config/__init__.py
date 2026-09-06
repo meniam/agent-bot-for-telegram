@@ -308,7 +308,7 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
                 if provider_map is None:
                     raise ValueError(f"[{name}] unknown provider config section: {provider}")
                 if not isinstance(provider_values, dict):
-                    raise ValueError(
+                    raise ValueError(  # noqa: TRY004  # config errors are ValueError
                         f"[{name}] config section providers.{provider} must be an object"
                     )
                 flatten_section(f"providers.{provider}", provider_values, provider_map)
@@ -421,7 +421,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         if raw is None:
             return ()
         if not isinstance(raw, list):
-            raise ValueError(f"[{name}] {field} must be null or a list of integers")
+            raise ValueError(f"[{name}] {field} must be null or a list of integers")  # noqa: TRY004  # config errors are ValueError
         try:
             return tuple(int(x) for x in raw)
         except (TypeError, ValueError) as e:
@@ -433,7 +433,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
 
     raw_for_all = data.get("allowed_for_all", False)
     if not isinstance(raw_for_all, bool):
-        raise ValueError(f"[{name}] allowed_for_all must be a boolean")
+        raise ValueError(f"[{name}] allowed_for_all must be a boolean")  # noqa: TRY004  # config errors are ValueError
 
     payload: dict[str, Any] = {
         "name": name,
@@ -509,7 +509,7 @@ def _read_config_data(path: Path) -> dict[str, Any]:
         raise ValueError(f"{path} has unsupported config format")
 
     if not isinstance(data, dict):
-        raise ValueError(f"{path.name} is empty or not an object")
+        raise ValueError(f"{path.name} is empty or not an object")  # noqa: TRY004  # config errors are ValueError
     return data
 
 
@@ -526,7 +526,7 @@ def load(path: Path | str | None = None) -> dict[str, BotConfig]:
         )
     data = _read_config_data(p)
 
-    if not isinstance(data, dict) or not data:
+    if not data:
         raise ValueError(f"{p.name} is empty or not an object")
 
     # Relative paths in the config resolve against the config file's directory.
@@ -540,7 +540,7 @@ def load(path: Path | str | None = None) -> dict[str, BotConfig]:
     bots = {}
     for name, cfg in data.items():
         if not isinstance(cfg, dict):
-            raise ValueError(f"[{name}] bot config must be an object")
+            raise ValueError(f"[{name}] bot config must be an object")  # noqa: TRY004  # config errors are ValueError
         bots[name] = _build(name, cfg, base_dir)
     if not bots:
         raise ValueError(f"{p.name} has no bot entries")

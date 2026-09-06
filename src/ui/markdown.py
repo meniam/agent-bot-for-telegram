@@ -249,8 +249,7 @@ def _render(node: SyntaxTreeNode) -> str:
             return block
         # Non-HTTP(S) or unknown media type: fall back to the alt text
         # (carried as the image node's children or `content`).
-        alt = "".join(_render(c) for c in ch) if ch else html.escape(node.content)
-        return alt
+        return "".join(_render(c) for c in ch) if ch else html.escape(node.content)
 
     if t == "hr":
         return "<hr>\n"

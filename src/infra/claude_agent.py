@@ -31,7 +31,7 @@ from claude_agent_sdk import (
 
 from .agent_base import BaseAgentBackend
 from .agent_types import (
-    AgentEventStreamTimeout,
+    AgentEventStreamTimeoutError,
     EphemeralResult,
     StreamChunk,
     ToolEventCallback,
@@ -205,36 +205,38 @@ class ClaudeAgentBackend(BaseAgentBackend):
             on_evt = self._on_tool_event
             post_matcher = "|".join(_TOOL_POST_PREVIEW_NAMES)
 
-            def _hook_field(input: Any, name: str, default: Any) -> Any:
+            def _hook_field(hook_input: Any, name: str, default: Any) -> Any:
                 """Read a field from the hook input, whether it is a dict or an object."""
-                if isinstance(input, dict):
-                    return input.get(name, default)
-                return getattr(input, name, default)
+                if isinstance(hook_input, dict):
+                    return hook_input.get(name, default)
+                return getattr(hook_input, name, default)
 
-            async def pre_hook(input: Any, _tool_use_id: Any, _context: Any) -> dict[str, Any]:
+            async def pre_hook(hook_input: Any, _tool_use_id: Any, _context: Any) -> dict[str, Any]:
                 """Mirror a PreToolUse hook to the tool-event callback (errors logged)."""
                 try:
                     await on_evt(
                         chat_id,
                         "pre",
-                        _hook_field(input, "tool_name", ""),
-                        dict(_hook_field(input, "tool_input", {}) or {}),
+                        _hook_field(hook_input, "tool_name", ""),
+                        dict(_hook_field(hook_input, "tool_input", {}) or {}),
                     )
                 except Exception:
                     log.exception("pre-tool hook failed")
                 return {}
 
-            async def post_hook(input: Any, _tool_use_id: Any, _context: Any) -> dict[str, Any]:
+            async def post_hook(
+                hook_input: Any, _tool_use_id: Any, _context: Any
+            ) -> dict[str, Any]:
                 """Mirror a PostToolUse hook (input + response) to the callback (errors logged)."""
                 try:
                     payload = {
-                        "tool_input": dict(_hook_field(input, "tool_input", {}) or {}),
-                        "tool_response": _hook_field(input, "tool_response", None),
+                        "tool_input": dict(_hook_field(hook_input, "tool_input", {}) or {}),
+                        "tool_response": _hook_field(hook_input, "tool_response", None),
                     }
                     await on_evt(
                         chat_id,
                         "post",
-                        _hook_field(input, "tool_name", ""),
+                        _hook_field(hook_input, "tool_name", ""),
                         payload,
                     )
                 except Exception:
@@ -356,10 +358,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
 
     async def ask(self, chat_id: int, prompt: str) -> str:
         """Run one turn and return the full reply text (drains ``ask_stream``)."""
-        chunks: list[str] = []
-        async for chunk in self.ask_stream(chat_id, prompt):
-            if chunk.kind == "text":
-                chunks.append(chunk.text)
+        chunks = [
+            chunk.text async for chunk in self.ask_stream(chat_id, prompt) if chunk.kind == "text"
+        ]
         return "".join(chunks).strip() or "(empty response)"
 
     async def ask_stream(self, chat_id: int, prompt: str) -> AsyncIterator[StreamChunk]:
@@ -400,7 +401,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                             yield StreamChunk(kind="text", text=block.text)
 
     async def _on_event_timeout(self, chat_id: int, client: ClaudeSDKClient) -> NoReturn:
-        """Interrupt a stalled turn and raise ``AgentEventStreamTimeout``.
+        """Interrupt a stalled turn and raise ``AgentEventStreamTimeoutError``.
 
         Called when the SDK emits no event for ``self._event_timeout`` seconds —
         e.g. a wedged MCP/web-fetch tool call during deep-research. Best-effort
@@ -413,7 +414,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
         log.warning("%s (chat_id=%s)", msg, chat_id)
         with contextlib.suppress(Exception):
             await client.interrupt()
-        raise AgentEventStreamTimeout(msg) from None
+        raise AgentEventStreamTimeoutError(msg) from None
 
     async def get_context_usage(self, chat_id: int) -> dict[str, Any]:
         """Return the SDK's token/context-window stats for the chat."""
@@ -542,9 +543,9 @@ class ClaudeAgentBackend(BaseAgentBackend):
         try:
             async for msg in query(prompt=prompt, options=options):
                 if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            parts.append(block.text)
+                    parts.extend(
+                        block.text for block in msg.content if isinstance(block, TextBlock)
+                    )
         except Exception:
             log.exception("generate_title failed")
             return None
@@ -711,7 +712,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                                 result = closer()
                                 if hasattr(result, "__await__"):
                                     await result
-                        raise AgentEventStreamTimeout(timeout_msg) from None
+                        raise AgentEventStreamTimeoutError(timeout_msg) from None
                 else:
                     msg = await iterator.__anext__()
             except StopAsyncIteration:
@@ -766,8 +767,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
             elif isinstance(msg, SystemMessage) and session_id is None:
                 # The `init` system message carries the session id before any
                 # output, so the live transcript path can be surfaced mid-run.
-                data = msg.data if isinstance(msg.data, dict) else {}
-                sid = data.get("session_id")
+                sid = msg.data.get("session_id")
                 if isinstance(sid, str) and sid:
                     session_id = sid
                     eph_log.info("session started id=%s", sid)

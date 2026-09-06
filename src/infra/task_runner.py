@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..config import BotConfig
 from .agent import AgentBackend
-from .agent_types import AgentEventStreamTimeout, EphemeralResult
+from .agent_types import AgentEventStreamTimeoutError, EphemeralResult
 from .task_logging import redact, task_log_context
 from .task_store import TaskStore
 from .task_types import DeliveryStatus, RunStatus, Task, TaskRun
@@ -227,7 +227,7 @@ class TaskRunner:
             )
         except Exception as e:  # isolate one task; never crash the loop
             cl.exception("task %s failed: %s", task.id, e)
-            log.error("task %s failed: %s", task.id, e, exc_info=True)
+            log.exception("task %s failed", task.id)
             return RunOutcome(
                 status="error",
                 output="",
@@ -402,7 +402,7 @@ class TaskRunner:
                     timeout=self._cfg.tasks_llm_timeout_sec,
                 )
             return await turn
-        except AgentEventStreamTimeout as e:
+        except AgentEventStreamTimeoutError as e:
             reason = f"llm_idle_timeout after {self._cfg.tasks_llm_idle_timeout_sec}s"
             log.warning("task %s: %s: %s", task.id, reason, e)
             return EphemeralResult(

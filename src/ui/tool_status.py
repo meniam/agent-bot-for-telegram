@@ -218,11 +218,12 @@ class ToolStatusMirror:
                     message_id=message_id,
                     rich_message=rich,
                 )
-                return
             except TelegramBadRequest as e:
                 if "message is not modified" in str(e).lower():
                     return
                 log.debug("tool status edit failed; sending new status", exc_info=True)
+            else:
+                return
         try:
             sent = await self._bot.send_rich_message(
                 chat_id=chat_id,

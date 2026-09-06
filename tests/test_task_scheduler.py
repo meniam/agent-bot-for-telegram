@@ -201,9 +201,9 @@ async def test_running_ids_tracked_during_run(tmp_path: Path) -> None:
 
     sched, store = _sched(
         tmp_path,
-        _ObservingRunner(),
+        _ObservingRunner(),  # type: ignore[arg-type]
         _cfg(),
-        running_ids=shared,  # type: ignore[arg-type]
+        running_ids=shared,
     )
     t = _once_task()
     await store.add(t)

@@ -22,7 +22,7 @@ def test_parse_duration_units() -> None:
     assert parse_duration_sec("30m") == 1800
     assert parse_duration_sec("2h") == 7200
     assert parse_duration_sec("1d") == 86400
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid duration"):
         parse_duration_sec("nonsense")
 
 
@@ -57,7 +57,7 @@ def test_parse_schedule_cron() -> None:
 
 def test_parse_schedule_invalid() -> None:
     """An unrecognized schedule string raises ValueError."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="schedule"):
         parse_schedule("not a schedule", now=FIXED_NOW)
 
 

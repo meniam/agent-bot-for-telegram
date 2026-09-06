@@ -139,7 +139,7 @@ class TaskService:
             owner_chat_id=chat_id,
             scope=scope,
             name=name.strip(),
-            kind=kind,  # type: ignore[arg-type]
+            kind=kind,
             schedule=schedule,
             prompt=prompt or None,
             script=script or None,

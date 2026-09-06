@@ -87,6 +87,10 @@ ignore = [
     "TD003",   # TODO issue link: there is no tracker to link to
     # Project adaptations, see .agents/decisions/.
     "ANN401",  # `Any` at the SDK / JSON boundaries is the real type there
+    "BLE001",  # Handlers log via injected per-chat loggers (`cl`, `ctx.glog`)
+               # that ruff cannot recognise as loggers; every blind
+               # `except Exception` here logs with a traceback or degrades
+               # on purpose (best-effort Telegram calls, fallbacks).
     "TC001",   # On 3.14 annotations are lazy (PEP 649); moving typing-only
     "TC002",   # imports under TYPE_CHECKING buys nothing and breaks dataclass
     "TC003",   # and pydantic field introspection.

@@ -39,7 +39,7 @@ async def handle(
     if len(body) > 4000:
         body = body[:3997] + "..."
     try:
-        await gate._bot.send_message(chat_id, body, parse_mode=None)
+        await gate.bot.send_message(chat_id, body, parse_mode=None)
     except Exception as e:
         log.exception("PushNotification: failed to send to Telegram")
         return PermissionResultDeny(

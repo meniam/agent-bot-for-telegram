@@ -35,12 +35,12 @@ async def handle(
 ) -> PermissionResultAllow | PermissionResultDeny:
     """Render the plan, post Approve/Reject, and await the verdict.
 
-    Stores the pending future in ``gate._plan_pending[chat_id]`` so a button tap
+    Stores the pending future in ``gate.plan_pending[chat_id]`` so a button tap
     (`on_callback`) or a freeform text reply (`consume_text`) can resolve it.
     Approve → Allow; reject/timeout → Deny whose message carries the user's
     feedback so the model revises and calls ExitPlanMode again.
     """
-    t = gate._t
+    t = gate.t
     plan = str(tool_input.get("plan", "") or "").strip()
     log.info(
         "ExitPlanMode: chat_id=%s plan_len=%d preview=%r",
@@ -51,14 +51,14 @@ async def handle(
 
     # 1. Render the plan body with Markdown so headings/lists survive.
     if plan:
-        if gate._send_md is not None:
+        if gate.send_md is not None:
             try:
-                await gate._send_md(chat_id, plan)
+                await gate.send_md(chat_id, plan)
             except Exception:
                 log.exception("ExitPlanMode: failed to send plan markdown")
         else:
             try:
-                await gate._bot.send_message(chat_id, plan, parse_mode=None)
+                await gate.bot.send_message(chat_id, plan, parse_mode=None)
             except Exception:
                 log.exception("ExitPlanMode: failed to send plan plain text")
 
@@ -80,7 +80,7 @@ async def handle(
         ]
     )
     try:
-        prompt = await gate._bot.send_message(
+        prompt = await gate.bot.send_message(
             chat_id, t.t("plan_header"), reply_markup=kb, parse_mode=None
         )
     except Exception:
@@ -91,33 +91,33 @@ async def handle(
 
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[tuple[str, str]] = loop.create_future()
-    gate._plan_pending[chat_id] = (fut, request_id, prompt.message_id)
+    gate.plan_pending[chat_id] = (fut, request_id, prompt.message_id)
 
     try:
-        decision, feedback = await asyncio.wait_for(fut, timeout=gate._timeout)
+        decision, feedback = await asyncio.wait_for(fut, timeout=gate.timeout)
     except TimeoutError:
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(chat_id, t.t("plan_timeout"), parse_mode=None)
+            await gate.bot.send_message(chat_id, t.t("plan_timeout"), parse_mode=None)
         return PermissionResultDeny(message=t.t("plan_rejected_default"))
     finally:
-        gate._plan_pending.pop(chat_id, None)
-        await gate._delete_prompt(chat_id, prompt.message_id)
+        gate.plan_pending.pop(chat_id, None)
+        await gate.delete_prompt(chat_id, prompt.message_id)
 
     if decision == "approve":
-        gate._cl(chat_id).info("ExitPlanMode: approved → agent continues")
+        gate.chat_log(chat_id).info("ExitPlanMode: approved → agent continues")
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(chat_id, t.t("plan_started"), parse_mode=None)
+            await gate.bot.send_message(chat_id, t.t("plan_started"), parse_mode=None)
         return PermissionResultAllow()
-    gate._cl(chat_id).info("ExitPlanMode: rejected (feedback_len=%d)", len(feedback))
+    gate.chat_log(chat_id).info("ExitPlanMode: rejected (feedback_len=%d)", len(feedback))
     with contextlib.suppress(Exception):
         if feedback:
-            await gate._bot.send_message(
+            await gate.bot.send_message(
                 chat_id,
                 t.t("plan_rejected_with_feedback"),
                 parse_mode=None,
             )
         else:
-            await gate._bot.send_message(chat_id, t.t("plan_rejected_msg"), parse_mode=None)
+            await gate.bot.send_message(chat_id, t.t("plan_rejected_msg"), parse_mode=None)
     if feedback:
         deny_message = (
             "User rejected the plan and provided the following feedback. "
@@ -135,7 +135,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
 
     No-op for stale callbacks (deletes the orphaned prompt).
     """
-    t = gate._t
+    t = gate.t
     data = callback.data or ""
     if not data.startswith("plan:"):
         return
@@ -146,7 +146,7 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
         return
 
     msg = callback.message if isinstance(callback.message, Message) else None
-    entry = gate._plan_pending.get(msg.chat.id) if msg is not None else None
+    entry = gate.plan_pending.get(msg.chat.id) if msg is not None else None
     if entry is None or entry[1] != request_id or entry[0].done():
         await callback.answer(t.t("callback_outdated"), show_alert=False)
         if msg is not None:
@@ -157,12 +157,12 @@ async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) ->
     fut, _rid, _msg_id = entry
     chat_id = msg.chat.id if msg is not None else 0
     if action == "approve":
-        gate._cl(chat_id).info("ExitPlanMode: approved via button")
+        gate.chat_log(chat_id).info("ExitPlanMode: approved via button")
         fut.set_result(("approve", ""))
         await callback.answer(t.t("plan_approved_toast"))
         return
     if action == "reject":
-        gate._cl(chat_id).info("ExitPlanMode: rejected via button")
+        gate.chat_log(chat_id).info("ExitPlanMode: rejected via button")
         fut.set_result(("reject", ""))
         await callback.answer(t.t("plan_rejected_toast"))
         return
@@ -176,13 +176,13 @@ def consume_text(gate: TelegramInteractionGate, chat_id: int, text: str) -> bool
     consumed as rejection-with-feedback; False otherwise (caller treats the
     text as a normal message).
     """
-    entry = gate._plan_pending.get(chat_id)
+    entry = gate.plan_pending.get(chat_id)
     if entry is None:
         return False
     fut, _rid, _msg_id = entry
     if fut.done():
         return False
     feedback = (text or "").strip()
-    gate._cl(chat_id).info("ExitPlanMode: rejected via text feedback: %r", feedback[:300])
+    gate.chat_log(chat_id).info("ExitPlanMode: rejected via text feedback: %r", feedback[:300])
     fut.set_result(("reject", feedback))
     return True

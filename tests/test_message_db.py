@@ -21,9 +21,10 @@ def _has_fts5() -> bool:
     conn = sqlite3.connect(":memory:")
     try:
         conn.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
-        return True
     except sqlite3.OperationalError:
         return False
+    else:
+        return True
     finally:
         conn.close()
 
@@ -111,7 +112,8 @@ def test_emit_records_iso_created_at(tmp_path: Path) -> None:
     h.close()
     row = _rows(db, "messages")[0]
     assert row["ts"] == 1_700_000_000.0
-    assert "T" in str(row["created_at"]) and len(str(row["created_at"])) == 19  # iso seconds
+    assert "T" in str(row["created_at"])
+    assert len(str(row["created_at"])) == 19  # iso seconds
 
 
 def test_emit_no_resolver_leaves_sessions_empty(tmp_path: Path) -> None:

@@ -89,13 +89,13 @@ class TelegramInteractionGate:
         ``chat_logger`` routes verdicts into per-chat log files; both fall back
         to plain sends / the module logger when omitted.
         """
-        self._bot = bot
-        self._t = translator
-        self._timeout = approval_timeout_sec
+        self.bot = bot
+        self.t = translator
+        self.timeout = approval_timeout_sec
         # Markdown sender. `ExitPlanMode` uses it to render the plan body
         # with code-block highlighting. Falls back to plain `send_message`
         # if the caller did not provide one.
-        self._send_md = send_md_callback
+        self.send_md = send_md_callback
         # Per-chat logger lookup so verdicts (Allow/Deny/Always, AQ picks,
         # plan approvals) land in the same `<chat_id>.log` file as the
         # other agent-flow events. Falls back to the module logger.
@@ -105,22 +105,22 @@ class TelegramInteractionGate:
         # button message is sent successfully; we use it to delete the
         # prompt on click / timeout so the chat does not pile up with stale
         # permission requests.
-        self._pending: dict[str, tuple[asyncio.Future[str], str, int, int | None]] = {}
+        self.pending: dict[str, tuple[asyncio.Future[str], str, int, int | None]] = {}
         # AskUserQuestion sessions: request_id -> session state.
         # Keyed by a short token embedded in callback_data (`aq:<rid>:...`).
-        self._aq: dict[str, _AQSession] = {}
+        self.aq: dict[str, _AQSession] = {}
         # Chats with a pending "abort" signal — the next iteration of the
         # AskUserQuestion loop returns immediately and any remaining
         # questions are recorded as skipped.
-        self._aq_aborted: set[int] = set()
+        self.aq_aborted: set[int] = set()
         # ExitPlanMode sessions per chat: chat_id -> (future, request_id,
         # prompt message id). Future resolves to ("approve", "") on click,
         # ("reject", feedback or "") on Reject or on freeform text reply.
-        self._plan_pending: dict[int, tuple[asyncio.Future[tuple[str, str]], str, int]] = {}
+        self.plan_pending: dict[int, tuple[asyncio.Future[tuple[str, str]], str, int]] = {}
 
     # ----- shared helpers -----
 
-    def _cl(self, chat_id: int) -> logging.Logger:
+    def chat_log(self, chat_id: int) -> logging.Logger:
         """Return the per-chat logger, falling back to the module logger."""
         if self._chat_logger is not None:
             try:
@@ -129,14 +129,14 @@ class TelegramInteractionGate:
                 log.exception("chat_logger lookup failed for %s", chat_id)
         return log
 
-    async def _delete_prompt(self, chat_id: int, message_id: int) -> None:
+    async def delete_prompt(self, chat_id: int, message_id: int) -> None:
         """Best-effort delete a prompt message, swallowing failures."""
         try:
-            await self._bot.delete_message(chat_id, message_id)
+            await self.bot.delete_message(chat_id, message_id)
         except Exception:
             log.debug("could not delete permission prompt", exc_info=True)
 
-    def _format_request(
+    def format_request(
         self,
         tool_name: str,
         tool_input: dict[str, Any],
@@ -147,7 +147,7 @@ class TelegramInteractionGate:
         Combines the context title/description/reason/blocked path with a
         truncated preview of ``tool_input`` into a single block of text.
         """
-        t = self._t
+        t = self.t
         head = ctx.title or t.t("permission_request_default_title", tool=tool_name)
         parts: list[str] = [head]
         if ctx.description and ctx.description != head:
@@ -211,10 +211,10 @@ class TelegramInteractionGate:
         iteration without rendering more questions. Safe to call when no
         AskUserQuestion is running.
         """
-        active = [s for s in self._aq.values() if s.chat_id == chat_id]
+        active = [s for s in self.aq.values() if s.chat_id == chat_id]
         if not any(not s.fut.done() for s in active):
             return
-        self._aq_aborted.add(chat_id)
+        self.aq_aborted.add(chat_id)
         for session in active:
             if not session.fut.done():
                 session.fut.set_result(None)

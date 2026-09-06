@@ -10,7 +10,7 @@ import pytest
 import src.infra.pi_agent as pi_agent_module
 from src.config import BotConfig
 from src.infra.agent_factory import create_agent_backend
-from src.infra.agent_types import AgentEventStreamTimeout, StreamChunk
+from src.infra.agent_types import AgentEventStreamTimeoutError, StreamChunk
 from src.infra.claude_agent import ClaudeAgentBackend
 from src.infra.codex_agent import CodexAgentBackend, _normalize_mcp_server
 from src.infra.pi_agent import PiAgentBackend
@@ -54,7 +54,7 @@ def test_factory_creates_codex_backend() -> None:
         system_prompt="x",
         add_dirs=[],
         on_tool_event=None,
-        codex_factory=lambda: _FakeCodex(),
+        codex_factory=_FakeCodex,
     )
     assert isinstance(backend, CodexAgentBackend)
 
@@ -758,7 +758,7 @@ async def test_codex_mcp_status_falls_back_to_cli_json(
         session_store=_store(),
         system_prompt="system",
         cwd=str(tmp_path),
-        codex_factory=lambda: _FakeCodex(),
+        codex_factory=_FakeCodex,
     )
     monkeypatch.setattr(backend, "_resolve_codex_bin", lambda: str(script))
 
@@ -1125,7 +1125,7 @@ async def test_ask_ephemeral_idle_timeout_closes_stream(
     monkeypatch.setattr(claude_module, "query", _query)
 
     backend = ClaudeAgentBackend(_store(), system_prompt="x", cwd="/vault")
-    with pytest.raises(AgentEventStreamTimeout, match="timed out"):
+    with pytest.raises(AgentEventStreamTimeoutError, match="timed out"):
         await backend.ask_ephemeral(
             5,
             "hi",
@@ -1160,7 +1160,7 @@ async def test_ask_ephemeral_not_supported_on_codex() -> None:
         system_prompt="x",
         add_dirs=[],
         on_tool_event=None,
-        codex_factory=lambda: _FakeCodex(),
+        codex_factory=_FakeCodex,
     )
     with pytest.raises(NotImplementedError):
         await backend.ask_ephemeral(1, "x", allowed_tools=())

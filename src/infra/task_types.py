@@ -205,7 +205,7 @@ def parse_schedule(text: str, *, now: datetime | None = None) -> TaskSchedule:
 
     if "T" in raw or _DATE_RE.match(raw):
         try:
-            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(raw)
         except ValueError as e:
             raise ValueError(f"Invalid timestamp '{raw}': {e}") from e
         dt = _ensure_aware(dt)
@@ -271,7 +271,7 @@ def compute_next_run(
         nxt: datetime = croniter(schedule.expr, base).get_next(datetime)
         return nxt
 
-    return None
+    raise ValueError(f"unknown schedule kind: {schedule.kind!r}")
 
 
 def compute_grace_seconds(schedule: TaskSchedule, *, now: datetime | None = None) -> int:

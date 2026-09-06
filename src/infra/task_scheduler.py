@@ -334,7 +334,7 @@ class TaskScheduler:
                     task_id=task.id,
                     scope=task.scope,
                     kind=task.kind,
-                    event=event,  # type: ignore[arg-type]
+                    event=event,
                     occurred_at=occurred_at,
                     scheduled_for=task.next_run_at,
                     details=details or {},

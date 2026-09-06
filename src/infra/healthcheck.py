@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     status, age = check(args.path, args.max_age)
-    print(status if age is None else f"{status} (age={age:.0f}s)")
+    print(status if age is None else f"{status} (age={age:.0f}s)")  # noqa: T201  # CLI output
     return 0 if status == "ok" else 1
 
 

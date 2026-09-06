@@ -200,7 +200,10 @@ class SqliteChatLogHandler(logging.Handler):
                             record.created,
                         ),
                     )
-            created_at = _dt.datetime.fromtimestamp(record.created).isoformat(timespec="seconds")
+            # Local wall time, like the text logs next to this DB; no zone by design.
+            created_at = _dt.datetime.fromtimestamp(record.created).isoformat(  # noqa: DTZ006
+                timespec="seconds"
+            )
             self._conn.execute(
                 _INSERT_MESSAGE,
                 (

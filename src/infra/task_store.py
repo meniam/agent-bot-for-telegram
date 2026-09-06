@@ -213,9 +213,7 @@ class TaskStore:
         """Return all persisted tasks currently marked as running."""
         running: list[Task] = []
         for path in self._all_files():
-            for task in self._read_file(path):
-                if task.state == "running":
-                    running.append(task)
+            running.extend(task for task in self._read_file(path) if task.state == "running")
         running.sort(key=lambda t: t.created_at, reverse=True)
         return running
 

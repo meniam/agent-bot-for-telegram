@@ -12,7 +12,7 @@ from pathlib import Path
 from aiogram.types import Message, ReactionTypeEmoji, User
 
 from ..handlers.context import BotContext
-from ..infra.agent_types import AgentEventStreamTimeout, AgentTurnReset
+from ..infra.agent_types import AgentEventStreamTimeoutError, AgentTurnResetError
 from ..infra.message_db import ROLE_BOT
 from ..services.upload_store import format_attachment_prompt
 from .file_delivery import parse_file_delivery, send_file_delivery
@@ -85,7 +85,7 @@ async def reply_with_agent(
     injects a user-context prefix on a brand-new session; drains pending
     uploads into the prompt; streams the turn through `DraftStreamer` under an
     `agent_timeout_sec` deadline; then renders the final answer. Each failure
-    mode (timeout, `AgentTurnReset`, `AgentEventStreamTimeout`, any other
+    mode (timeout, `AgentTurnResetError`, `AgentEventStreamTimeoutError`, any other
     exception) is logged and turned into a user-facing message or a silent
     return. A final answer may instead be a `bot_files` delivery or a
     `bot_questionnaire` prompt, which are dispatched here. Session titling runs
@@ -130,10 +130,10 @@ async def reply_with_agent(
                 ctx.tr.t("agent_timeout", seconds=ctx.cfg.agent_timeout_sec),
             )
             return
-        except AgentTurnReset as e:
+        except AgentTurnResetError as e:
             cl.info("agent turn reset: %s", e)
             return
-        except AgentEventStreamTimeout as e:
+        except AgentEventStreamTimeoutError as e:
             ctx.glog.warning("[%s] agent event stream timeout: %s", ctx.cfg.name, e)
             cl.warning("agent event stream timeout: %s", e)
             await send_md(message, ctx.tr.t("agent_stalled"))

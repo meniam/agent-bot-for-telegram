@@ -141,11 +141,7 @@ def _extract_payload(text: str) -> str | None:
 
 def _resolve_roots(roots: list[Path]) -> list[Path]:
     """Resolve and keep only existing roots (filesystem I/O; run off the loop)."""
-    resolved: list[Path] = []
-    for root in roots:
-        if root.exists():
-            resolved.append(root.resolve())
-    return resolved
+    return [root.resolve() for root in roots if root.exists()]
 
 
 def _probe(path: Path) -> tuple[bool, bool, int]:
@@ -171,8 +167,4 @@ def _resolve_requested_path(path_text: str, roots: list[Path]) -> Path | None:
 
 def _is_relative_to(path: Path, root: Path) -> bool:
     """Return whether `path` lies under `root`."""
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+    return path.is_relative_to(root)

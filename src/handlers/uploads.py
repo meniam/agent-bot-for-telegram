@@ -34,7 +34,8 @@ async def _save_upload(
     Returns the resulting PendingFile or None on a handled error
     (caller has already replied to the user).
     """
-    assert ctx.uploads is not None  # caller checked  # nosec B101
+    if ctx.uploads is None:
+        raise RuntimeError("uploads are disabled; caller must check ctx.uploads first")
     if (
         ctx.cfg.upload_max_bytes > 0
         and size_hint is not None
