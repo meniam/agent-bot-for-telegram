@@ -40,7 +40,7 @@ def _handler(
 
 def _payload(result: dict[str, Any]) -> dict[str, Any]:
     """Decode the JSON payload from a tool result envelope."""
-    return cast(dict[str, Any], json.loads(result["content"][0]["text"]))
+    return cast("dict[str, Any]", json.loads(result["content"][0]["text"]))
 
 
 def test_tool_name_is_mcp_qualified() -> None:
@@ -58,9 +58,7 @@ def test_build_server_returns_config(tmp_path: Path) -> None:
 async def test_create_then_list(tmp_path: Path) -> None:
     """Creating a task then listing returns that task."""
     handle = _handler(tmp_path)
-    created = _payload(
-        await handle({"action": "create", "schedule": "2m", "prompt": "remind me"})
-    )
+    created = _payload(await handle({"action": "create", "schedule": "2m", "prompt": "remind me"}))
     assert created["success"] is True
     task_id = created["task"]["id"]
     assert created["task"]["kind"] == "llm"
@@ -92,9 +90,7 @@ async def test_agent_cannot_create_global_scope(tmp_path: Path) -> None:
     # The tool schema does not expose scope, so even an admin's agent only ever
     # creates user-scoped tasks here.
     handle = _handler(tmp_path, chat_id=ADMIN)
-    created = _payload(
-        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
-    )
+    created = _payload(await handle({"action": "create", "schedule": "2m", "prompt": "x"}))
     assert created["task"]["scope"] == "user"
 
 
@@ -108,9 +104,9 @@ async def test_action_requires_task_id(tmp_path: Path) -> None:
 async def test_pause_run_rm_roundtrip(tmp_path: Path) -> None:
     """Create, pause, then remove a task round trips cleanly."""
     handle = _handler(tmp_path)
-    task_id = _payload(
-        await handle({"action": "create", "schedule": "every 1h", "prompt": "x"})
-    )["task"]["id"]
+    task_id = _payload(await handle({"action": "create", "schedule": "every 1h", "prompt": "x"}))[
+        "task"
+    ]["id"]
 
     paused = _payload(await handle({"action": "pause", "task_id": task_id}))
     assert paused["success"] is True
@@ -162,9 +158,9 @@ async def test_show_running_returns_live_log_path(tmp_path: Path) -> None:
     svc = TaskService(TaskStore(tmp_path), _cfg(), running_logs=running_logs)
     handle = make_task_handler(USER, svc)
 
-    task_id = _payload(
-        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
-    )["task"]["id"]
+    task_id = _payload(await handle({"action": "create", "schedule": "2m", "prompt": "x"}))["task"][
+        "id"
+    ]
     running_logs[task_id] = "/root/.claude/projects/-vault/sess-9.jsonl"
 
     out = _payload(await handle({"action": "show", "task_id": task_id}))
@@ -179,9 +175,9 @@ async def test_show_persisted_running_without_live_log(tmp_path: Path) -> None:
     svc = TaskService(store, _cfg())
     handle = make_task_handler(USER, svc)
 
-    task_id = _payload(
-        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
-    )["task"]["id"]
+    task_id = _payload(await handle({"action": "create", "schedule": "2m", "prompt": "x"}))["task"][
+        "id"
+    ]
     task = await store.get(task_id)
     assert task is not None
     await store.update(task.model_copy(update={"state": "running"}))
@@ -197,9 +193,9 @@ async def test_show_persisted_running_without_live_log(tmp_path: Path) -> None:
 async def test_show_without_runs_omits_last_run(tmp_path: Path) -> None:
     """Show on a never-run task omits the last_run block."""
     handle = _handler(tmp_path)
-    task_id = _payload(
-        await handle({"action": "create", "schedule": "2m", "prompt": "x"})
-    )["task"]["id"]
+    task_id = _payload(await handle({"action": "create", "schedule": "2m", "prompt": "x"}))["task"][
+        "id"
+    ]
     out = _payload(await handle({"action": "show", "task_id": task_id}))
     assert out["success"] is True
     assert "last_run" not in out

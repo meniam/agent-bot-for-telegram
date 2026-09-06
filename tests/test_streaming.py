@@ -55,7 +55,7 @@ async def test_stream_returns_text_only() -> None:
 
     from collections.abc import AsyncGenerator
 
-    async def _chunks() -> AsyncGenerator[StreamChunk, None]:
+    async def _chunks() -> AsyncGenerator[StreamChunk]:
         """Yield interleaved text and thinking chunks."""
         yield StreamChunk(kind="text", text="hello")
         yield StreamChunk(kind="thinking", text="think")
@@ -72,12 +72,12 @@ async def test_stream_calls_send_draft() -> None:
 
     streamer = _make_streamer()
 
-    async def _chunks() -> AsyncGenerator[StreamChunk, None]:
+    async def _chunks() -> AsyncGenerator[StreamChunk]:
         """Yield a single text chunk."""
         yield StreamChunk(kind="text", text="hi")
 
     await streamer.stream(42, _chunks())
-    cast(AsyncMock, streamer._bot.send_rich_message_draft).assert_called()
+    cast("AsyncMock", streamer._bot.send_rich_message_draft).assert_called()
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_stream_empty_chunks() -> None:
 
     streamer = _make_streamer()
 
-    async def _chunks() -> AsyncGenerator[StreamChunk, None]:
+    async def _chunks() -> AsyncGenerator[StreamChunk]:
         """Yield no chunks."""
         return
         yield StreamChunk(kind="text", text="")

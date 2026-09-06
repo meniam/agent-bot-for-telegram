@@ -41,10 +41,7 @@ def test_tool_brief_keeps_only_tail_for_external_path() -> None:
 
 def test_tool_brief_treats_relative_path_as_working_dir_path() -> None:
     """A relative path is treated as living under the working dir."""
-    assert (
-        _tool_brief("Read", {"file_path": "README.md"}, Path("/repo"))
-        == "@/README.md"
-    )
+    assert _tool_brief("Read", {"file_path": "README.md"}, Path("/repo")) == "@/README.md"
 
 
 def test_tool_brief_leaves_non_path_fields_unchanged() -> None:

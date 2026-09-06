@@ -165,9 +165,7 @@ def parse_duration_sec(text: str) -> int:
     """Parse '30m' / '2h' / '1d' into seconds. Raises ValueError otherwise."""
     m = _DURATION_RE.match(text.strip().lower())
     if not m:
-        raise ValueError(
-            f"Invalid duration: '{text}'. Use a format like '30m', '2h', or '1d'."
-        )
+        raise ValueError(f"Invalid duration: '{text}'. Use a format like '30m', '2h', or '1d'.")
     value = int(m.group(1))
     unit = m.group(2)[0]  # m, h, or d
     multipliers = {"m": 60, "h": 3600, "d": 86400}
@@ -234,9 +232,7 @@ def _validate_cron(expr: str) -> None:
     try:
         from croniter import croniter
     except ImportError as e:  # pragma: no cover - croniter is a hard dependency
-        raise ValueError(
-            "Cron schedules require the 'croniter' package."
-        ) from e
+        raise ValueError("Cron schedules require the 'croniter' package.") from e
     if not croniter.is_valid(expr):
         raise ValueError(f"Invalid cron expression: '{expr}'.")
 

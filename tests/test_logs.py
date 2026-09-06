@@ -115,8 +115,7 @@ def test_lru_eviction_closes_sqlite_connection(tmp_path: Path) -> None:
     # The SQLite handler now lives behind the per-chat QueueListener, not on the
     # logger (which only holds the QueueHandler + file handler).
     sqlite_handlers = [
-        h for h in logs._listeners[1].handlers
-        if isinstance(h, SqliteChatLogHandler)
+        h for h in logs._listeners[1].handlers if isinstance(h, SqliteChatLogHandler)
     ]
     assert sqlite_handlers
     conn = sqlite_handlers[0]._conn
@@ -232,8 +231,7 @@ def test_eviction_closes_file_handler_too(tmp_path: Path) -> None:
     logs = BotLogs(name="evictfile", base_dir=tmp_path / "bot", capacity=1)
     log1 = logs.for_chat(1)
     file_handlers = [
-        h for h in log1.handlers
-        if isinstance(h, logging.handlers.RotatingFileHandler)
+        h for h in log1.handlers if isinstance(h, logging.handlers.RotatingFileHandler)
     ]
     assert file_handlers
     fh = file_handlers[0]
@@ -257,13 +255,8 @@ def test_evicted_chat_reopens_as_fresh_logger(tmp_path: Path) -> None:
     assert reborn is not first  # brand-new logger object
     assert reborn.handlers  # freshly wired, not the stripped corpse
     # SQLite logging is now wired through a fresh QueueHandler + listener.
-    assert any(
-        isinstance(h, logging.handlers.QueueHandler) for h in reborn.handlers
-    )
-    assert any(
-        isinstance(h, SqliteChatLogHandler)
-        for h in logs._listeners[1].handlers
-    )
+    assert any(isinstance(h, logging.handlers.QueueHandler) for h in reborn.handlers)
+    assert any(isinstance(h, SqliteChatLogHandler) for h in logs._listeners[1].handlers)
     _cleanup_loggers("bot.reopen")
 
 
@@ -271,8 +264,7 @@ def test_general_logger_no_base_dir_has_no_file_handler() -> None:
     """Verify the general logger has no file handler without a base dir."""
     logs = BotLogs(name="gennobase", base_dir=None)
     assert not any(
-        isinstance(h, logging.handlers.RotatingFileHandler)
-        for h in logs.general.handlers
+        isinstance(h, logging.handlers.RotatingFileHandler) for h in logs.general.handlers
     )
     _cleanup_loggers("bot.gennobase")
 

@@ -25,9 +25,7 @@ from .context import BotContext
 _VOICE_SPOOL_MAX_BYTES = 4 * 1024 * 1024
 
 
-async def handle_voice(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def handle_voice(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Transcribe a voice/audio message and route the text to plan or agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     media = message.voice or message.audio
@@ -44,46 +42,33 @@ async def handle_voice(
         await send_md(message, ctx.tr.t("voice_disabled"))
         return
     duration = getattr(media, "duration", 0) or 0
-    if (
-        ctx.cfg.voice_max_duration_sec > 0
-        and duration > ctx.cfg.voice_max_duration_sec
-    ):
+    if ctx.cfg.voice_max_duration_sec > 0 and duration > ctx.cfg.voice_max_duration_sec:
         await send_md(
             message,
-            ctx.tr.t(
-                "voice_too_long", seconds=ctx.cfg.voice_max_duration_sec
-            ),
+            ctx.tr.t("voice_too_long", seconds=ctx.cfg.voice_max_duration_sec),
         )
         return
 
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
-        with tempfile.SpooledTemporaryFile(
-            max_size=_VOICE_SPOOL_MAX_BYTES
-        ) as buf:
+        with tempfile.SpooledTemporaryFile(max_size=_VOICE_SPOOL_MAX_BYTES) as buf:
             # SpooledTemporaryFile satisfies the BinaryIO protocol at
             # runtime but mypy's aiogram stubs don't accept it directly.
-            await ctx.bot.download(
-                media.file_id, destination=cast(BinaryIO, buf)
-            )
+            await ctx.bot.download(media.file_id, destination=cast("BinaryIO", buf))
             buf.seek(0)
             transcript = await ctx.transcriber.transcribe(
                 buf,
                 filename=audio_filename(message),
             )
     except (TimeoutError, TranscriptionError, aiohttp.ClientError) as e:
-        ctx.glog.warning(
-            "[%s] transcription failed: %s", ctx.cfg.name, e
-        )
+        ctx.glog.warning("[%s] transcription failed: %s", ctx.cfg.name, e)
         cl.warning("transcription failed: %s", e)
         await send_md(message, ctx.tr.t("voice_error", error=str(e)[:200]))
         return
     except Exception as e:
         ctx.glog.exception("[%s] transcription error", ctx.cfg.name)
         cl.exception("transcription error: %s", e)
-        await send_md(
-            message, ctx.tr.t("voice_error", error=type(e).__name__)
-        )
+        await send_md(message, ctx.tr.t("voice_error", error=type(e).__name__))
         return
 
     if not transcript:

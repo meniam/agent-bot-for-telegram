@@ -61,11 +61,10 @@ def _short_json(value: Any, limit: int = 300) -> str:
 def _short_text(value: Any, limit: int = 300) -> str:
     """Render a tool-result payload (str or block list) to a short string."""
     if isinstance(value, list):
-        value = " ".join(
-            b.get("text", "") for b in value if isinstance(b, dict)
-        )
+        value = " ".join(b.get("text", "") for b in value if isinstance(b, dict))
     text = str(redact(value))
     return text if len(text) <= limit else text[:limit] + "…"
+
 
 _TITLE_MAX_LEN = 60
 # The title text must follow the bot's configured language; `{lang}` is the
@@ -112,10 +111,8 @@ class ClaudeAgentBackend(BaseAgentBackend):
         add_dirs: list[str] | None = None,
         on_tool_event: ToolEventCallback | None = None,
         initial_model: str | None = None,
-        task_server_factory: Callable[[int], "McpSdkServerConfig | None"] | None = None,
-        graphiti_server_factory: (
-            Callable[[int], "McpSdkServerConfig | None"] | None
-        ) = None,
+        task_server_factory: Callable[[int], McpSdkServerConfig | None] | None = None,
+        graphiti_server_factory: (Callable[[int], McpSdkServerConfig | None] | None) = None,
         lang: str = "en",
         dangerously_skip_permissions: bool = False,
         event_timeout_sec: float = CLAUDE_EVENT_TIMEOUT_SEC,
@@ -214,9 +211,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                     return input.get(name, default)
                 return getattr(input, name, default)
 
-            async def pre_hook(
-                input: Any, _tool_use_id: Any, _context: Any
-            ) -> dict[str, Any]:
+            async def pre_hook(input: Any, _tool_use_id: Any, _context: Any) -> dict[str, Any]:
                 """Mirror a PreToolUse hook to the tool-event callback (errors logged)."""
                 try:
                     await on_evt(
@@ -229,15 +224,11 @@ class ClaudeAgentBackend(BaseAgentBackend):
                     log.exception("pre-tool hook failed")
                 return {}
 
-            async def post_hook(
-                input: Any, _tool_use_id: Any, _context: Any
-            ) -> dict[str, Any]:
+            async def post_hook(input: Any, _tool_use_id: Any, _context: Any) -> dict[str, Any]:
                 """Mirror a PostToolUse hook (input + response) to the callback (errors logged)."""
                 try:
                     payload = {
-                        "tool_input": dict(
-                            _hook_field(input, "tool_input", {}) or {}
-                        ),
+                        "tool_input": dict(_hook_field(input, "tool_input", {}) or {}),
                         "tool_response": _hook_field(input, "tool_response", None),
                     }
                     await on_evt(
@@ -251,12 +242,8 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 return {}
 
             hooks = {
-                "PreToolUse": [
-                    HookMatcher(matcher=None, hooks=[cast(Any, pre_hook)])
-                ],
-                "PostToolUse": [
-                    HookMatcher(matcher=post_matcher, hooks=[cast(Any, post_hook)])
-                ],
+                "PreToolUse": [HookMatcher(matcher=None, hooks=[cast("Any", pre_hook)])],
+                "PostToolUse": [HookMatcher(matcher=post_matcher, hooks=[cast("Any", post_hook)])],
             }
 
         def _on_stderr(line: str) -> None:
@@ -286,19 +273,17 @@ class ClaudeAgentBackend(BaseAgentBackend):
             include_partial_messages=True,
             can_use_tool=can_use_tool,
             permission_mode=(
-                "bypassPermissions"
-                if self._dangerously_skip_permissions
-                else "default"
+                "bypassPermissions" if self._dangerously_skip_permissions else "default"
             ),
             cwd=self._cwd,
             add_dirs=list(self._add_dirs),
             setting_sources=["user", "project", "local"],
             skills="all",
-            hooks=cast(Any, hooks),
+            hooks=cast("Any", hooks),
             session_id=session_id,
             resume=resume,
             stderr=_on_stderr,
-            mcp_servers=cast(Any, mcp_servers),
+            mcp_servers=cast("Any", mcp_servers),
         )
 
     async def _enter_client(self, chat_id: int, client: ClaudeSDKClient) -> None:
@@ -414,9 +399,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
                         if isinstance(block, TextBlock):
                             yield StreamChunk(kind="text", text=block.text)
 
-    async def _on_event_timeout(
-        self, chat_id: int, client: ClaudeSDKClient
-    ) -> NoReturn:
+    async def _on_event_timeout(self, chat_id: int, client: ClaudeSDKClient) -> NoReturn:
         """Interrupt a stalled turn and raise ``AgentEventStreamTimeout``.
 
         Called when the SDK emits no event for ``self._event_timeout`` seconds —
@@ -446,7 +429,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
             raise ValueError(f"unsupported Claude mode: {mode}")
         async with self._lock(chat_id):
             client = await self._get_client(chat_id)
-            await client.set_permission_mode(cast(Any, mode))
+            await client.set_permission_mode(cast("Any", mode))
             self._clients[chat_id] = (client, time.monotonic())
             self._modes[chat_id] = mode
 
@@ -668,7 +651,7 @@ class ClaudeAgentBackend(BaseAgentBackend):
             permission_mode="bypassPermissions" if skip_perms else "default",
             allowed_tools=[] if skip_perms else list(allowed_tools),
             can_use_tool=can_use_tool,
-            mcp_servers=cast(Any, mcp_servers),
+            mcp_servers=cast("Any", mcp_servers),
         )
         log.info(
             "ask_ephemeral chat_id=%s skip_perms=%s mcp=%s tools=%s",
@@ -754,18 +737,14 @@ class ClaudeAgentBackend(BaseAgentBackend):
                 if isinstance(content, list):
                     for block in content:
                         if isinstance(block, ToolResultBlock) and block.is_error:
-                            eph_log.warning(
-                                "tool-error: %s", _short_text(block.content)
-                            )
+                            eph_log.warning("tool-error: %s", _short_text(block.content))
             elif isinstance(msg, ResultMessage):
                 session_id = msg.session_id
                 is_error = bool(msg.is_error)
                 subtype = msg.subtype
                 stop_reason = msg.stop_reason
                 api_error_status = (
-                    str(msg.api_error_status)
-                    if msg.api_error_status is not None
-                    else None
+                    str(msg.api_error_status) if msg.api_error_status is not None else None
                 )
                 permission_denials = [str(x) for x in (msg.permission_denials or [])]
                 errors = [str(x) for x in (msg.errors or [])]

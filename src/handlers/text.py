@@ -18,9 +18,7 @@ from ..ui.agent_reply import react_to, reply_with_agent
 from .context import BotContext
 
 
-async def handle_text(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def handle_text(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Route a plain text message: plan rejection, plan prompt, or agent turn."""
     # If a plan-approval prompt is on screen, treat the text as
     # rejection-with-feedback for ExitPlanMode and do NOT also fire a

@@ -62,8 +62,6 @@ class AlbumDebouncer:
             try:
                 await on_fire(message, cap)
             except Exception:
-                self._glog.exception(
-                    "[%s] album fire failed", self._bot_name
-                )
+                self._glog.exception("[%s] album fire failed", self._bot_name)
 
         self._timers[mg] = asyncio.create_task(_delayed())

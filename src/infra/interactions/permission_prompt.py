@@ -70,9 +70,7 @@ async def handle(
     )
 
     try:
-        sent = await gate._bot.send_message(
-            chat_id, text, reply_markup=kb, parse_mode=None
-        )
+        sent = await gate._bot.send_message(chat_id, text, reply_markup=kb, parse_mode=None)
     except Exception:
         log.exception("permission prompt failed")
         gate._pending.pop(request_id, None)
@@ -87,9 +85,7 @@ async def handle(
         # does not keep an orphaned set of buttons around.
         await gate._delete_prompt(chat_id, sent.message_id)
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(
-                chat_id, t.t("approval_timeout"), parse_mode=None
-            )
+            await gate._bot.send_message(chat_id, t.t("approval_timeout"), parse_mode=None)
     finally:
         gate._pending.pop(request_id, None)
 
@@ -109,9 +105,7 @@ async def handle(
     return PermissionResultDeny(message=t.t("permission_denied_via_telegram"))
 
 
-async def on_callback(
-    gate: TelegramInteractionGate, callback: CallbackQuery
-) -> None:
+async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) -> None:
     """Resolve a `perm:` button tap into the pending future's decision.
 
     Validates freshness and chat ownership, sets the decision, and deletes the

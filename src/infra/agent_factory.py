@@ -32,9 +32,7 @@ def create_agent_backend(
     add_dirs: list[str],
     on_tool_event: ToolEventCallback | None,
     task_server_factory: Callable[[int], McpSdkServerConfig | None] | None = None,
-    graphiti_server_factory: (
-        Callable[[int], McpSdkServerConfig | None] | None
-    ) = None,
+    graphiti_server_factory: (Callable[[int], McpSdkServerConfig | None] | None) = None,
     codex_factory: Callable[[], Any] | None = None,
     pi_transport_factory: Callable[[str | None], Any] | None = None,
 ) -> AgentBackend:

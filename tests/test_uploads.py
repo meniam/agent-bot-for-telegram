@@ -16,7 +16,8 @@ def test_safe_filename_strips_traversal() -> None:
     # (legitimate for extensions). What matters is the result is a single
     # path component with no separators.
     out = _safe_filename("../etc/passwd")
-    assert "/" not in out and "\\" not in out
+    assert "/" not in out
+    assert "\\" not in out
     assert _safe_filename("a/b\\c") == "a_b_c"
     assert _safe_filename("normal_name.txt") == "normal_name.txt"
 
@@ -56,7 +57,8 @@ def test_format_attachment_prompt_includes_paths(tmp_path: Path) -> None:
         PendingFile(path=tmp_path / "b.pdf", kind="document", name="b.pdf"),
     ]
     out = format_attachment_prompt(items, "describe these")
-    assert "a.jpg" in out and "b.pdf" in out
+    assert "a.jpg" in out
+    assert "b.pdf" in out
     assert "describe these" in out
     assert "Read tool" in out
 

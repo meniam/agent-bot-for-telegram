@@ -206,9 +206,7 @@ async def sessions_switch_callback(
     await callback.answer(ctx.tr.t("sess_switched", title=session.title))
 
 
-async def sessions_nav_callback(
-    callback: CallbackQuery, ctx: BotContext, **_: object
-) -> None:
+async def sessions_nav_callback(callback: CallbackQuery, ctx: BotContext, **_: object) -> None:
     """Pagination + mode toggle + delete-confirm cancel all land here."""
     chat_id = callback.message.chat.id if callback.message else None
     parts = (callback.data or "").split(":")

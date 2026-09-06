@@ -127,9 +127,7 @@ async def test_run_script_nonzero_exit_is_error(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     bot = _FakeBot()
     runner = _runner(tmp_path, bot, cfg)
-    (tmp_path / "scripts" / "boom.py").write_text(
-        "import sys; sys.exit(3)", encoding="utf-8"
-    )
+    (tmp_path / "scripts" / "boom.py").write_text("import sys; sys.exit(3)", encoding="utf-8")
     outcome = await runner.run(_script_task("boom.py"))
     assert outcome.status == "error"
     assert outcome.exit_code == 3

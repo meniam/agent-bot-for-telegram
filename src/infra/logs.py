@@ -98,9 +98,7 @@ class BotLogs:
         """The bot-wide general logger (``bot.<name>``)."""
         return self._general
 
-    def set_session_resolver(
-        self, resolver: Callable[[int], Session | None]
-    ) -> None:
+    def set_session_resolver(self, resolver: Callable[[int], Session | None]) -> None:
         """Inject the current-session lookup used to tag SQLite message rows.
 
         Set after the `SessionStore` exists (it is built later than `BotLogs`).
@@ -142,16 +140,10 @@ class BotLogs:
         if self._messages_dir is not None:
             self._messages_dir.mkdir(parents=True, exist_ok=True)
             resolver = self._session_resolver
-            session_of = (
-                (lambda cid=chat_id: resolver(cid))
-                if resolver is not None
-                else None
-            )
+            session_of = (lambda cid=chat_id: resolver(cid)) if resolver is not None else None
             # The SQLite write runs in the listener's background thread; the
             # logger only enqueues (non-blocking) via the QueueHandler.
-            sqlite_handler = SqliteChatLogHandler(
-                self._messages_dir / f"{chat_id}.db", session_of
-            )
+            sqlite_handler = SqliteChatLogHandler(self._messages_dir / f"{chat_id}.db", session_of)
             log_queue: queue.SimpleQueue[logging.LogRecord] = queue.SimpleQueue()
             listener = logging.handlers.QueueListener(
                 log_queue, sqlite_handler, respect_handler_level=True
@@ -189,9 +181,7 @@ class BotLogs:
         listener = self._listeners.pop(chat_id, None)
         if listener is not None:
             if background:
-                t = threading.Thread(
-                    target=self._shutdown_listener, args=(listener,), daemon=True
-                )
+                t = threading.Thread(target=self._shutdown_listener, args=(listener,), daemon=True)
                 self._evict_threads.add(t)
                 t.start()
             else:
@@ -200,9 +190,7 @@ class BotLogs:
             with contextlib.suppress(Exception):
                 handler.close()
             log.removeHandler(handler)
-        logging.Logger.manager.loggerDict.pop(
-            f"bot.{self._name}.chat.{chat_id}", None
-        )
+        logging.Logger.manager.loggerDict.pop(f"bot.{self._name}.chat.{chat_id}", None)
 
     def close(self) -> None:
         """Stop every chat's SQLite listener and close its handlers (shutdown)."""

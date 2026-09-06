@@ -39,9 +39,7 @@ async def start(message: Message, ctx: BotContext, **_: object) -> None:
     await send_md(message, ctx.tr.t("start_greeting"))
 
 
-async def new_session(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def new_session(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Start a fresh agent session and clear any armed plan / pending question."""
     session = await ctx.agent.new_session(message.chat.id)
     ctx.plan_router.disarm(message.chat.id)
@@ -62,9 +60,7 @@ async def cancel_pending(
     await send_md(message, ctx.tr.t("nothing_to_cancel"))
 
 
-async def show_context(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def show_context(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Report the session's context-window usage for `/context`."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     await ctx.bot.send_chat_action(message.chat.id, "typing")
@@ -73,9 +69,7 @@ async def show_context(
     except Exception as e:
         ctx.glog.exception("[%s] context usage failed", ctx.cfg.name)
         cl.exception("context usage failed: %s", e)
-        await send_md(
-            message, ctx.tr.t("context_error", error=type(e).__name__)
-        )
+        await send_md(message, ctx.tr.t("context_error", error=type(e).__name__))
         return
     cl.info(
         "context: %.1f%% (%s/%s tokens, model=%s)",
@@ -95,53 +89,39 @@ async def show_context(
     )
 
 
-async def stop_query(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def stop_query(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Interrupt the running agent turn for `/stop`."""
     try:
         interrupted = await ctx.agent.interrupt(message.chat.id)
     except Exception as e:
         cl.exception("interrupt failed: %s", e)
-        await send_md(
-            message, ctx.tr.t("error_internal", error=type(e).__name__)
-        )
+        await send_md(message, ctx.tr.t("error_internal", error=type(e).__name__))
         return
     cl.info("/stop interrupted=%s", interrupted)
-    await send_md(
-        message, ctx.tr.t("stop_ok" if interrupted else "stop_idle")
-    )
+    await send_md(message, ctx.tr.t("stop_ok" if interrupted else "stop_idle"))
 
 
-async def show_mcp(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def show_mcp(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Report connected MCP servers for `/mcp`."""
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
         status = await ctx.agent.get_mcp_status(message.chat.id)
     except Exception as e:
         cl.exception("get_mcp_status failed: %s", e)
-        await send_md(
-            message, ctx.tr.t("mcp_error", error=type(e).__name__)
-        )
+        await send_md(message, ctx.tr.t("mcp_error", error=type(e).__name__))
         return
     cl.info("/mcp servers=%d", len(status.get("mcpServers") or []))
     await send_md(message, format_mcp_status(status, ctx.tr))
 
 
-async def show_info(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def show_info(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Report agent/server info for `/info`."""
     await ctx.bot.send_chat_action(message.chat.id, "typing")
     try:
         info = await ctx.agent.get_server_info(message.chat.id)
     except Exception as e:
         cl.exception("get_server_info failed: %s", e)
-        await send_md(
-            message, ctx.tr.t("info_error", error=type(e).__name__)
-        )
+        await send_md(message, ctx.tr.t("info_error", error=type(e).__name__))
         return
     if info is None:
         await send_md(message, ctx.tr.t("info_unavailable"))
@@ -158,23 +138,15 @@ async def whoami(message: Message, ctx: BotContext, **_: object) -> None:
     else:
         access = ctx.tr.t("whoami_access_allowed")
     mode = ctx.agent.current_mode(chat_id)
-    session_key = (
-        "whoami_session_yes" if ctx.agent.has_session(chat_id)
-        else "whoami_session_no"
-    )
+    session_key = "whoami_session_yes" if ctx.agent.has_session(chat_id) else "whoami_session_no"
     user = message.from_user
     none = ctx.tr.t("whoami_none")
     if user is not None:
         user_id = str(user.id)
         username = f"@{user.username}" if user.username else none
-        name = " ".join(
-            filter(None, [user.first_name, user.last_name])
-        ) or none
+        name = " ".join(filter(None, [user.first_name, user.last_name])) or none
         lang = user.language_code or none
-        premium = (
-            ctx.tr.t("whoami_yes") if user.is_premium
-            else ctx.tr.t("whoami_no")
-        )
+        premium = ctx.tr.t("whoami_yes") if user.is_premium else ctx.tr.t("whoami_no")
     else:
         user_id = username = name = lang = none
         premium = none

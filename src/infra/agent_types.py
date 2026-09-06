@@ -95,7 +95,7 @@ class AgentBackend(Protocol):
         prompt: str,
         *,
         allowed_tools: tuple[str, ...],
-        on_session_path: "Callable[[str], None] | None" = None,
+        on_session_path: Callable[[str], None] | None = None,
         idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """One-shot turn in a throwaway session (for scheduled LLM tasks).
@@ -154,27 +154,23 @@ class AgentBackend(Protocol):
         """Whether a live session object currently exists for this chat."""
         ...
 
-    async def new_session(self, chat_id: int) -> "Session":
+    async def new_session(self, chat_id: int) -> Session:
         """Start a fresh session and make it current; the previous one is kept."""
         ...
 
-    async def switch_session(
-        self, chat_id: int, sid: str
-    ) -> "Session | None":
+    async def switch_session(self, chat_id: int, sid: str) -> Session | None:
         """Make session ``sid`` current (next turn resumes its history); None if unknown."""
         ...
 
-    async def delete_session(
-        self, chat_id: int, sid: str
-    ) -> "Session | None":
+    async def delete_session(self, chat_id: int, sid: str) -> Session | None:
         """Delete session ``sid``; drops the live client if it was current. None if unknown."""
         ...
 
-    async def list_sessions(self, chat_id: int) -> "list[Session]":
+    async def list_sessions(self, chat_id: int) -> list[Session]:
         """All stored sessions for the chat, ordered by creation."""
         ...
 
-    async def current_session(self, chat_id: int) -> "Session | None":
+    async def current_session(self, chat_id: int) -> Session | None:
         """Return the chat's current session, or None if it has none yet."""
         ...
 

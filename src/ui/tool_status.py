@@ -23,11 +23,13 @@ log = logging.getLogger(__name__)
 
 # Tools whose UX is already provided by the interaction gate — skip the
 # generic pre-tool announcement so the chat does not see two notices.
-_GATE_HANDLED_TOOLS = frozenset({
-    "AskUserQuestion",
-    "ExitPlanMode",
-    "PushNotification",
-})
+_GATE_HANDLED_TOOLS = frozenset(
+    {
+        "AskUserQuestion",
+        "ExitPlanMode",
+        "PushNotification",
+    }
+)
 
 # Per-tool preferred input field for the brief status line. Tools not
 # listed fall back to the first scalar value in `tool_input`.
@@ -53,10 +55,12 @@ _TOOL_PRIMARY_FIELD: dict[str, str] = {
     "Codex": "status",
 }
 
-_TOOL_PATH_FIELDS = frozenset({
-    "file_path",
-    "notebook_path",
-})
+_TOOL_PATH_FIELDS = frozenset(
+    {
+        "file_path",
+        "notebook_path",
+    }
+)
 
 _STATUS_LINE_MAX = 88
 
@@ -179,9 +183,7 @@ class ToolStatusMirror:
         self._bot_name = bot_name
         self._last_status_message: dict[int, int] = {}
         self._working_dir = (
-            Path(working_dir).expanduser().resolve(strict=False)
-            if working_dir
-            else None
+            Path(working_dir).expanduser().resolve(strict=False) if working_dir else None
         )
 
     def begin_turn(self, chat_id: int) -> None:
@@ -249,13 +251,9 @@ class ToolStatusMirror:
                 tool_input = _tool_input_from_payload(payload)
                 desc = _tool_brief(tool_name, tool_input, self._working_dir)
                 if desc:
-                    body = self._tr.t(
-                        "tool_status_pre", tool=tool_display, desc=desc
-                    )
+                    body = self._tr.t("tool_status_pre", tool=tool_display, desc=desc)
                 else:
-                    body = self._tr.t(
-                        "tool_status_pre_no_desc", tool=tool_display
-                    )
+                    body = self._tr.t("tool_status_pre_no_desc", tool=tool_display)
                 cl.info(
                     "hook %s: %s",
                     phase,
@@ -301,6 +299,4 @@ class ToolStatusMirror:
                     )
                     return
         except Exception:
-            self._glog.exception(
-                "[%s] tool-event delivery failed", self._bot_name
-            )
+            self._glog.exception("[%s] tool-event delivery failed", self._bot_name)

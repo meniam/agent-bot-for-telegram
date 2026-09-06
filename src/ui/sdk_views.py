@@ -55,11 +55,7 @@ def format_context_usage(
     )
     lines = [tr.t("context_title"), "", summary, "", tr.t("context_categories")]
     cats = sorted(
-        (
-            c
-            for c in (usage.get("categories") or [])
-            if int(c.get("tokens") or 0) > 0
-        ),
+        (c for c in (usage.get("categories") or []) if int(c.get("tokens") or 0) > 0),
         key=lambda c: int(c["tokens"]),
         reverse=True,
     )
@@ -91,7 +87,11 @@ _MCP_ICON: dict[str, str] = {
 
 # Render order — active first, broken last.
 _MCP_GROUP_ORDER: tuple[str, ...] = (
-    "connected", "needs-auth", "pending", "disabled", "failed",
+    "connected",
+    "needs-auth",
+    "pending",
+    "disabled",
+    "failed",
 )
 
 
@@ -131,9 +131,7 @@ def format_mcp_status(status: dict[str, Any], tr: Translator) -> str:
             suffix = f" — {', '.join(extra)}" if extra else ""
             lines.append(f"   • `{name}`{suffix}")
             if s.get("error"):
-                lines.append(
-                    "     " + tr.t("mcp_error_line", error=str(s["error"])[:300])
-                )
+                lines.append("     " + tr.t("mcp_error_line", error=str(s["error"])[:300]))
     return "\n".join(lines)
 
 
@@ -141,11 +139,7 @@ def format_server_info(info: dict[str, Any], tr: Translator) -> str:
     """Render server info (output style and command list) as Markdown."""
     cmds = info.get("commands") or []
     style = info.get("output_style") or info.get("outputStyle") or "default"
-    styles = (
-        info.get("available_output_styles")
-        or info.get("outputStyles")
-        or []
-    )
+    styles = info.get("available_output_styles") or info.get("outputStyles") or []
     lines = [tr.t("info_header"), tr.t("info_output_style", style=style)]
     if styles:
         lines.append(

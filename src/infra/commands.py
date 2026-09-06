@@ -29,10 +29,22 @@ log = logging.getLogger(__name__)
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 # Reserve names handled by the bot itself.
-_BUILTIN_NAMES = frozenset({
-    "start", "new", "context", "plan", "cancel",
-    "stop", "mode", "model", "mcp", "info", "whoami", "help",
-})
+_BUILTIN_NAMES = frozenset(
+    {
+        "start",
+        "new",
+        "context",
+        "plan",
+        "cancel",
+        "stop",
+        "mode",
+        "model",
+        "mcp",
+        "info",
+        "whoami",
+        "help",
+    }
+)
 
 # Hard cap on a single command file; anything larger is almost certainly
 # misconfigured (the prompt is sent to Claude verbatim).
@@ -123,9 +135,7 @@ def load_commands(commands_dir: Path) -> list[CommandDef]:
             )
             continue
         if name in _BUILTIN_NAMES:
-            log.warning(
-                "skipping %s: command name %r clashes with a built-in", path, name
-            )
+            log.warning("skipping %s: command name %r clashes with a built-in", path, name)
             continue
         if name in seen:
             log.warning(
@@ -142,7 +152,5 @@ def load_commands(commands_dir: Path) -> list[CommandDef]:
         if len(description) > 256:
             description = description[:253] + "…"
         seen.add(name)
-        out.append(
-            CommandDef(name=name, description=description, body=body, source=path)
-        )
+        out.append(CommandDef(name=name, description=description, body=body, source=path))
     return out

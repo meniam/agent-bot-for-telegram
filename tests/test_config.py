@@ -167,24 +167,18 @@ def test_default_load_prefers_yaml_over_json(
         """,
     )
     json_path = _write(tmp_path, {"beta": {"telegram_bot_token": "2:def"}})
-    monkeypatch.setattr(
-        config_module, "DEFAULT_CONFIG_PATHS", (yaml_path, json_path)
-    )
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATHS", (yaml_path, json_path))
 
     bots = load()
 
     assert list(bots) == ["alpha"]
 
 
-def test_default_load_falls_back_to_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_default_load_falls_back_to_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the default loader falls back to JSON when no YAML exists."""
     yaml_path = tmp_path / "config.yaml"
     json_path = _write(tmp_path, {"beta": {"telegram_bot_token": "2:def"}})
-    monkeypatch.setattr(
-        config_module, "DEFAULT_CONFIG_PATHS", (yaml_path, json_path)
-    )
+    monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATHS", (yaml_path, json_path))
 
     bots = load()
 
@@ -205,9 +199,7 @@ def test_placeholder_token_rejected(tmp_path: Path) -> None:
         load(p)
 
 
-def test_env_fallback_for_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_fallback_for_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a missing token falls back to the per-bot environment variable."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN_ALPHA", "9:zzz")
     p = _write(tmp_path, {"alpha": {}})
@@ -217,9 +209,7 @@ def test_env_fallback_for_token(
 
 def test_acl_defaults_are_fail_closed() -> None:
     """Verify ACL and provider defaults are fail-closed."""
-    cfg = BotConfig.model_validate(
-        {"name": "x", "telegram_bot_token": "1:abc"}
-    )
+    cfg = BotConfig.model_validate({"name": "x", "telegram_bot_token": "1:abc"})
     assert cfg.allowed_for_all is False
     assert cfg.allowed_chat_ids == ()
     assert cfg.blacklist_chat_ids == ()
@@ -274,9 +264,7 @@ def test_pi_agent_config_accepted() -> None:
 def test_invalid_agent_config_rejected(field: str, value: str) -> None:
     """Verify invalid agent enum values are rejected."""
     with pytest.raises(ValidationError):
-        BotConfig.model_validate(
-            {"name": "x", "telegram_bot_token": "1:abc", field: value}
-        )
+        BotConfig.model_validate({"name": "x", "telegram_bot_token": "1:abc", field: value})
 
 
 def test_allowed_chat_ids_must_be_list(tmp_path: Path) -> None:
@@ -307,9 +295,7 @@ def test_blacklist_parses_integers(tmp_path: Path) -> None:
 def test_extra_fields_rejected() -> None:
     """Verify unknown config fields are rejected."""
     with pytest.raises(ValidationError):
-        BotConfig.model_validate(
-            {"name": "x", "telegram_bot_token": "1:abc", "garbage": True}
-        )
+        BotConfig.model_validate({"name": "x", "telegram_bot_token": "1:abc", "garbage": True})
 
 
 def test_tasks_section_loads(tmp_path: Path) -> None:
@@ -338,9 +324,11 @@ def test_tasks_section_loads(tmp_path: Path) -> None:
     bots = load(p)
     cfg = bots["alpha"]
     assert cfg.tasks_enabled is True
-    assert cfg.tasks_dir is not None and Path(cfg.tasks_dir).is_absolute()
+    assert cfg.tasks_dir is not None
+    assert Path(cfg.tasks_dir).is_absolute()
     assert Path(cfg.tasks_dir).is_dir()
-    assert cfg.tasks_scripts_dir is not None and Path(cfg.tasks_scripts_dir).is_dir()
+    assert cfg.tasks_scripts_dir is not None
+    assert Path(cfg.tasks_scripts_dir).is_dir()
     assert cfg.tasks_tick_interval_sec == 30
     assert cfg.tasks_llm_timeout_sec == 3600
     assert cfg.tasks_llm_idle_timeout_sec == 300

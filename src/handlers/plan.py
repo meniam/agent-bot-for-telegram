@@ -40,23 +40,17 @@ async def start_plan_mode(
     )
 
 
-async def permission_callback(
-    callback: CallbackQuery, ctx: BotContext, **_: object
-) -> None:
+async def permission_callback(callback: CallbackQuery, ctx: BotContext, **_: object) -> None:
     """Forward a `perm:` button tap to the interaction gate."""
     await ctx.gate.handle_callback(callback)
 
 
-async def ask_user_question_callback(
-    callback: CallbackQuery, ctx: BotContext, **_: object
-) -> None:
+async def ask_user_question_callback(callback: CallbackQuery, ctx: BotContext, **_: object) -> None:
     """Forward an `aq:` button tap to the interaction gate."""
     await ctx.gate.handle_aq_callback(callback)
 
 
-async def plan_callback(
-    callback: CallbackQuery, ctx: BotContext, **_: object
-) -> None:
+async def plan_callback(callback: CallbackQuery, ctx: BotContext, **_: object) -> None:
     """Forward a `plan:` button tap to the interaction gate."""
     await ctx.gate.handle_plan_callback(callback)
 
@@ -65,7 +59,5 @@ def register(dp: Dispatcher) -> None:
     """Register the `/plan` command and its gate callback handlers on ``dp``."""
     dp.message.register(start_plan_mode, Command("plan"))
     dp.callback_query.register(permission_callback, F.data.startswith("perm:"))
-    dp.callback_query.register(
-        ask_user_question_callback, F.data.startswith("aq:")
-    )
+    dp.callback_query.register(ask_user_question_callback, F.data.startswith("aq:"))
     dp.callback_query.register(plan_callback, F.data.startswith("plan:"))

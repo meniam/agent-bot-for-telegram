@@ -153,12 +153,8 @@ class BotConfig(BaseModel):
     # `claude --dangerously-skip-permissions`). Skips the Telegram permission
     # gate entirely. Intended for isolated/containerized runs.
     agent_dangerously_skip_permissions: bool = False
-    codex_sandbox: Literal[
-        "read_only", "workspace_write", "danger_full_access"
-    ] = "workspace_write"
-    codex_approval_mode: Literal[
-        "default", "on_request", "never", "full_auto"
-    ] = "default"
+    codex_sandbox: Literal["read_only", "workspace_write", "danger_full_access"] = "workspace_write"
+    codex_approval_mode: Literal["default", "on_request", "never", "full_auto"] = "default"
     pi_cli_bin: str | None = None
     pi_tools_mode: Literal["default", "read_only", "no_tools"] = "default"
     pi_session_persistence: bool = False
@@ -261,16 +257,12 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
             )
         flat[target] = value
 
-    def flatten_section(
-        source: str, values: dict[str, Any], section_map: dict[str, str]
-    ) -> None:
+    def flatten_section(source: str, values: dict[str, Any], section_map: dict[str, str]) -> None:
         """Remap a section's keys onto flat targets via ``section_map``."""
         for nested_key, nested_value in values.items():
             target = section_map.get(nested_key)
             if target is None:
-                raise ValueError(
-                    f"[{name}] unknown config key in section {source}: {nested_key}"
-                )
+                raise ValueError(f"[{name}] unknown config key in section {source}: {nested_key}")
             set_field(target, nested_value, source)
 
     for key, value in data.items():
@@ -288,14 +280,10 @@ def _flatten_nested_sections(name: str, data: dict[str, Any]) -> dict[str, Any]:
                         raise ValueError(
                             f"[{name}] config section gateway.access must be an object"
                         )
-                    flatten_section(
-                        "gateway.access", gateway_value, GATEWAY_ACCESS_FIELDS
-                    )
+                    flatten_section("gateway.access", gateway_value, GATEWAY_ACCESS_FIELDS)
                 elif gateway_key == "voice":
                     if not isinstance(gateway_value, dict):
-                        raise ValueError(
-                            f"[{name}] config section gateway.voice must be an object"
-                        )
+                        raise ValueError(f"[{name}] config section gateway.voice must be an object")
                     flatten_section("gateway.voice", gateway_value, NESTED_CONFIG_SECTIONS["voice"])
                 elif gateway_key == "uploads":
                     if not isinstance(gateway_value, dict):
@@ -359,9 +347,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         f"TELEGRAM_BOT_TOKEN_{name.upper()}", ""
     )
     if not raw_token or raw_token.startswith("put-"):
-        raise ValueError(
-            f"[{name}] telegram_bot_token is missing (or still a placeholder)."
-        )
+        raise ValueError(f"[{name}] telegram_bot_token is missing (or still a placeholder).")
 
     raw_groq = (
         data.get("groq_api_key")
@@ -375,9 +361,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
     if working_dir:
         wd = _resolve_path(working_dir, base_dir)
         if not wd.is_dir():
-            raise ValueError(
-                f"[{name}] working_dir does not exist or is not a directory: {wd}"
-            )
+            raise ValueError(f"[{name}] working_dir does not exist or is not a directory: {wd}")
         working_dir = str(wd)
 
     logs_dir = data.get("logs_dir")
@@ -402,9 +386,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
     if commands_dir:
         cd = _resolve_path(commands_dir, base_dir)
         if not cd.is_dir():
-            raise ValueError(
-                f"[{name}] commands_dir does not exist or is not a directory: {cd}"
-            )
+            raise ValueError(f"[{name}] commands_dir does not exist or is not a directory: {cd}")
         commands_dir = str(cd)
 
     tasks_dir = data.get("tasks_dir")
@@ -431,9 +413,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
     elif isinstance(raw_allowed_tools, list):
         tasks_allowed_tools = tuple(str(x) for x in raw_allowed_tools)
     else:
-        raise ValueError(
-            f"[{name}] tasks.allowed_tools must be null or a list of tool names"
-        )
+        raise ValueError(f"[{name}] tasks.allowed_tools must be null or a list of tool names")
 
     def _parse_chat_id_list(field: str) -> tuple[int, ...]:
         """Coerce a config list field into a tuple of integer chat IDs."""
@@ -441,15 +421,11 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         if raw is None:
             return ()
         if not isinstance(raw, list):
-            raise ValueError(
-                f"[{name}] {field} must be null or a list of integers"
-            )
+            raise ValueError(f"[{name}] {field} must be null or a list of integers")
         try:
             return tuple(int(x) for x in raw)
         except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"[{name}] {field} must contain integer chat IDs"
-            ) from e
+            raise ValueError(f"[{name}] {field} must contain integer chat IDs") from e
 
     allowed_chat_ids = _parse_chat_id_list("allowed_chat_ids")
     blacklist_chat_ids = _parse_chat_id_list("blacklist_chat_ids")
@@ -457,9 +433,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
 
     raw_for_all = data.get("allowed_for_all", False)
     if not isinstance(raw_for_all, bool):
-        raise ValueError(
-            f"[{name}] allowed_for_all must be a boolean"
-        )
+        raise ValueError(f"[{name}] allowed_for_all must be a boolean")
 
     payload: dict[str, Any] = {
         "name": name,
@@ -467,9 +441,7 @@ def _build(name: str, data: dict[str, Any], base_dir: Path) -> BotConfig:
         "system_prompt": data.get("system_prompt"),
         "agent_provider": data.get("agent_provider", "claude"),
         "agent_model": data.get("agent_model"),
-        "agent_dangerously_skip_permissions": data.get(
-            "agent_dangerously_skip_permissions", False
-        ),
+        "agent_dangerously_skip_permissions": data.get("agent_dangerously_skip_permissions", False),
         "codex_sandbox": data.get("codex_sandbox", "workspace_write"),
         "codex_approval_mode": data.get("codex_approval_mode", "default"),
         "pi_cli_bin": data.get("pi_cli_bin"),

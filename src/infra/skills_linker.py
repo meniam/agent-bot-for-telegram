@@ -18,9 +18,7 @@ PROVIDER_SKILLS_SUBDIR: dict[str, str] = {
 }
 
 
-def link_skills(
-    working_dir: str | None, provider: str, glog: logging.Logger, name: str
-) -> None:
+def link_skills(working_dir: str | None, provider: str, glog: logging.Logger, name: str) -> None:
     """Refresh our skill symlinks under ``<working_dir>/<provider skills dir>``.
 
     Existing real directories are left untouched; only our own stale symlinks

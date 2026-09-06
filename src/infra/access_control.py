@@ -26,13 +26,9 @@ def make_acl(cfg: BotConfig, glog: logging.Logger) -> Callable[[int], bool]:
         return chat_id in allowed_set
 
     if cfg.allowed_for_all:
-        glog.warning(
-            "[%s] access: OPEN TO EVERYONE (allowed_for_all=true)", cfg.name
-        )
+        glog.warning("[%s] access: OPEN TO EVERYONE (allowed_for_all=true)", cfg.name)
     else:
-        glog.info(
-            "[%s] access restricted to %d chat_id(s)", cfg.name, len(allowed_set)
-        )
+        glog.info("[%s] access restricted to %d chat_id(s)", cfg.name, len(allowed_set))
     if blacklist_set:
         glog.info("[%s] blacklist: %d chat_id(s)", cfg.name, len(blacklist_set))
 

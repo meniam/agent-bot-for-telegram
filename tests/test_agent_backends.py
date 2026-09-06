@@ -91,7 +91,7 @@ async def test_claude_resume_failure_falls_back_to_fresh_session(
             self.options = options
             created.append(self)
 
-        async def __aenter__(self) -> "_FakeClient":
+        async def __aenter__(self) -> _FakeClient:
             """Enter the context, raising if a resume id was requested."""
             if self.options.resume is not None:
                 raise ProcessError("boom", exit_code=1)
@@ -137,7 +137,7 @@ async def test_claude_backend_times_out_silent_event_stream(
             self.interrupted = False
             created.append(self)
 
-        async def __aenter__(self) -> "_SilentClient":
+        async def __aenter__(self) -> _SilentClient:
             """Enter the context."""
             return self
 
@@ -393,7 +393,7 @@ class _SlowCodex:
         self.thread = _SlowThread()
         self.thread_start_kwargs: dict[str, object] = {}
 
-    async def __aenter__(self) -> "_SlowCodex":
+    async def __aenter__(self) -> _SlowCodex:
         """Enter the client context."""
         return self
 
@@ -415,7 +415,7 @@ class _FakeCodex:
         self.thread = _FakeThread()
         self.thread_start_kwargs: dict[str, object] = {}
 
-    async def __aenter__(self) -> "_FakeCodex":
+    async def __aenter__(self) -> _FakeCodex:
         """Enter the client context."""
         return self
 
@@ -748,9 +748,9 @@ async def test_codex_mcp_status_falls_back_to_cli_json(
     script = tmp_path / "codex"
     script.write_text(
         "#!/bin/sh\n"
-        "printf '%s\\n' '[{\"name\":\"graphiti-memory\",\"enabled\":true,"
-        "\"transport\":{\"type\":\"streamable_http\","
-        "\"url\":\"http://graphiti:8000/mcp\"}}]'\n",
+        'printf \'%s\\n\' \'[{"name":"graphiti-memory","enabled":true,'
+        '"transport":{"type":"streamable_http",'
+        '"url":"http://graphiti:8000/mcp"}}]\'\n',
         encoding="utf-8",
     )
     script.chmod(0o755)
@@ -1097,7 +1097,7 @@ async def test_ask_ephemeral_idle_timeout_closes_stream(
             self.sent_init = False
             self.closed = False
 
-        def __aiter__(self) -> "_SilentAfterInit":
+        def __aiter__(self) -> _SilentAfterInit:
             """Return this object as its async iterator."""
             return self
 
@@ -1131,7 +1131,7 @@ async def test_ask_ephemeral_idle_timeout_closes_stream(
             "hi",
             allowed_tools=("Read",),
             on_session_path=paths.append,
-            idle_timeout_sec=cast(int, 0.01),
+            idle_timeout_sec=cast("int", 0.01),
         )
 
     assert stream.closed is True
@@ -1209,21 +1209,22 @@ class _ChunkStderr:
 
 def _pi_process() -> Any:
     """Construct a bare ``PiRpcProcess`` (no real subprocess spawned)."""
-    return pi_agent_module.PiRpcProcess(
-        cli_bin="pi", cwd=None, model=None, persist_session=True
-    )
+    return pi_agent_module.PiRpcProcess(cli_bin="pi", cwd=None, model=None, persist_session=True)
 
 
 async def test_pi_reader_survives_oversized_stdout_line() -> None:
     """A line over the StreamReader limit must not kill the reader task."""
     proc = _pi_process()
-    proc._proc = type("P", (), {"stdout": _ScriptedStdout(
-        ["overrun", b'{"type":"response","id":"1","ok":true}\n']
-    )})()
+    proc._proc = type(
+        "P",
+        (),
+        {"stdout": _ScriptedStdout(["overrun", b'{"type":"response","id":"1","ok":true}\n'])},
+    )()
     fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
     proc._pending["1"] = fut
     await proc._read_stdout()
-    assert fut.done() and fut.result()["ok"] is True
+    assert fut.done()
+    assert fut.result()["ok"] is True
 
 
 async def test_pi_drain_stderr_consumes_large_output_without_hanging() -> None:

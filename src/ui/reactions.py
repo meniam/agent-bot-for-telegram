@@ -43,7 +43,7 @@ class ReactionPicker:
         return self._default
 
     @classmethod
-    def from_translator(cls, translator: Translator) -> "ReactionPicker":
+    def from_translator(cls, translator: Translator) -> ReactionPicker:
         """Build a picker from the translator's `reactions` rules, skipping invalid ones."""
         raw_rules = translator.get("reactions", []) or []
         compiled: list[tuple[re.Pattern[str], str]] = []
@@ -52,9 +52,7 @@ class ReactionPicker:
                 pattern = re.compile(entry["pattern"])
                 emoji = entry["emoji"]
             except (KeyError, TypeError, re.error) as e:
-                log.warning(
-                    "skipping invalid reaction rule %r: %s", entry, e
-                )
+                log.warning("skipping invalid reaction rule %r: %s", entry, e)
                 continue
             compiled.append((pattern, emoji))
         default = translator.get("default_reaction", FALLBACK_REACTION)

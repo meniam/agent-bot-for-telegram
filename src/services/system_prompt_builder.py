@@ -5,9 +5,7 @@ from pathlib import Path
 from ..config import BotConfig
 from ..i18n import Translator
 
-BUILTIN_SYSTEM_PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "config" / "system_prompt.md"
-)
+BUILTIN_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent.parent / "config" / "system_prompt.md"
 
 
 def load_builtin_system_prompt() -> str:

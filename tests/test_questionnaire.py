@@ -163,11 +163,7 @@ def test_long_options_render_in_message_text_not_buttons() -> None:
     keyboard = _keyboard("token", questionnaire, 0, {}, tr)
 
     assert long_option in text
-    button_texts = [
-        button.text
-        for row in keyboard.inline_keyboard
-        for button in row
-    ]
+    button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
     assert long_option not in button_texts
     assert button_texts[:2] == ["1", "2"]
 

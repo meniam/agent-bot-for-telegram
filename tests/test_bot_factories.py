@@ -97,8 +97,19 @@ def test_command_list_includes_all_builtins() -> None:
     out = _build_bot_command_list(tr, [])
     names = {bc.command for bc in out}
     assert {
-        "start", "new", "sess", "context", "plan", "cancel",
-        "stop", "mode", "model", "mcp", "info", "whoami", "help",
+        "start",
+        "new",
+        "sess",
+        "context",
+        "plan",
+        "cancel",
+        "stop",
+        "mode",
+        "model",
+        "mcp",
+        "info",
+        "whoami",
+        "help",
     }.issubset(names)
 
 

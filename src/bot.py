@@ -67,9 +67,9 @@ def _build_bot_command_list(
     ``tasks_enabled`` is set.
     """
     builtin = [
-        BotCommand(command="start",   description=tr.t("bot_command_start")),
-        BotCommand(command="new",     description=tr.t("bot_command_new")),
-        BotCommand(command="sess",    description=tr.t("bot_command_sess")),
+        BotCommand(command="start", description=tr.t("bot_command_start")),
+        BotCommand(command="new", description=tr.t("bot_command_new")),
+        BotCommand(command="sess", description=tr.t("bot_command_sess")),
         *(
             [
                 BotCommand(command="tasks", description=tr.t("bot_command_tasks")),
@@ -79,19 +79,17 @@ def _build_bot_command_list(
             else []
         ),
         BotCommand(command="context", description=tr.t("bot_command_context")),
-        BotCommand(command="plan",    description=tr.t("bot_command_plan")),
-        BotCommand(command="cancel",  description=tr.t("bot_command_cancel")),
-        BotCommand(command="stop",    description=tr.t("bot_command_stop")),
-        BotCommand(command="mode",    description=tr.t("bot_command_mode")),
-        BotCommand(command="model",   description=tr.t("bot_command_model")),
-        BotCommand(command="mcp",     description=tr.t("bot_command_mcp")),
-        BotCommand(command="info",    description=tr.t("bot_command_info")),
-        BotCommand(command="whoami",  description=tr.t("bot_command_whoami")),
-        BotCommand(command="help",    description=tr.t("bot_command_help")),
+        BotCommand(command="plan", description=tr.t("bot_command_plan")),
+        BotCommand(command="cancel", description=tr.t("bot_command_cancel")),
+        BotCommand(command="stop", description=tr.t("bot_command_stop")),
+        BotCommand(command="mode", description=tr.t("bot_command_mode")),
+        BotCommand(command="model", description=tr.t("bot_command_model")),
+        BotCommand(command="mcp", description=tr.t("bot_command_mcp")),
+        BotCommand(command="info", description=tr.t("bot_command_info")),
+        BotCommand(command="whoami", description=tr.t("bot_command_whoami")),
+        BotCommand(command="help", description=tr.t("bot_command_help")),
     ]
-    return builtin + [
-        BotCommand(command=c.name, description=c.description) for c in commands
-    ]
+    return builtin + [BotCommand(command=c.name, description=c.description) for c in commands]
 
 
 def _make_bot(cfg: BotConfig) -> Bot:
@@ -162,15 +160,11 @@ def _make_transcriber(
         model=cfg.groq_model,
         timeout_sec=cfg.groq_timeout_sec,
     )
-    glog.info(
-        "[%s] groq transcription enabled (model=%s)", cfg.name, cfg.groq_model
-    )
+    glog.info("[%s] groq transcription enabled (model=%s)", cfg.name, cfg.groq_model)
     return transcriber
 
 
-def _make_uploads(
-    cfg: BotConfig, glog: logging.Logger
-) -> UploadStore | None:
+def _make_uploads(cfg: BotConfig, glog: logging.Logger) -> UploadStore | None:
     """Build the upload store, or None when no uploads directory is configured."""
     if not cfg.uploads_dir:
         return None
@@ -179,9 +173,7 @@ def _make_uploads(
     return uploads
 
 
-def _load_custom_commands(
-    cfg: BotConfig, glog: logging.Logger
-) -> list[CommandDef]:
+def _load_custom_commands(cfg: BotConfig, glog: logging.Logger) -> list[CommandDef]:
     """Load custom command definitions from the configured commands directory."""
     if not cfg.commands_dir:
         return []
@@ -247,9 +239,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         chat_logger=bot_logs.for_chat,
     )
 
-    tool_mirror = ToolStatusMirror(
-        bot, tr, bot_logs, glog, cfg.name, working_dir=cfg.working_dir
-    )
+    tool_mirror = ToolStatusMirror(bot, tr, bot_logs, glog, cfg.name, working_dir=cfg.working_dir)
 
     add_dirs: list[str] = []
     if cfg.uploads_dir:
@@ -277,9 +267,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             Path(cfg.tasks_dir) / "tasks.log",
         )
     elif cfg.tasks_enabled:
-        glog.warning(
-            "[%s] tasks_enabled but tasks_dir is unset — tasks disabled", cfg.name
-        )
+        glog.warning("[%s] tasks_enabled but tasks_dir is unset — tasks disabled", cfg.name)
 
     task_server_factory = (
         (lambda chat_id: build_task_server(chat_id, task_service))
@@ -300,9 +288,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         try:
             graphiti_proxy = await GraphitiProxy.discover(graphiti_url, graphiti_host)
         except Exception as e:
-            glog.warning(
-                "[%s] graphiti discovery failed (%s); memory disabled", cfg.name, e
-            )
+            glog.warning("[%s] graphiti discovery failed (%s); memory disabled", cfg.name, e)
         else:
             glog.info(
                 "[%s] graphiti memory: %d tools, per-chat group_id",
@@ -334,9 +320,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
     plan_router = PlanRouter(agent, gate, tr, glog, cfg.name)
     album = AlbumDebouncer(glog, cfg.name)
     commands = _load_custom_commands(cfg, glog)
-    bot_command_list = _build_bot_command_list(
-        tr, commands, tasks_enabled=cfg.tasks_enabled
-    )
+    bot_command_list = _build_bot_command_list(tr, commands, tasks_enabled=cfg.tasks_enabled)
 
     ctx = BotContext(
         cfg=cfg,
@@ -381,19 +365,15 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
             workdir_lock=workdir_lock,
             running_logs=running_logs,
         )
+
         async def _alert_loop_death(exc: BaseException) -> None:
             """Push a scheduler-death alert to every admin chat (best-effort)."""
-            text = (
-                f"⚠️ Task scheduler loop died: "
-                f"{type(exc).__name__}: {exc}".strip()
-            )
+            text = f"⚠️ Task scheduler loop died: {type(exc).__name__}: {exc}".strip()
             for admin_id in cfg.admin_chat_ids:
                 with contextlib.suppress(Exception):
                     await send_md_to_chat(bot, admin_id, text)
 
-        heartbeat_path = (
-            Path(cfg.tasks_heartbeat_path) if cfg.tasks_heartbeat_path else None
-        )
+        heartbeat_path = Path(cfg.tasks_heartbeat_path) if cfg.tasks_heartbeat_path else None
         scheduler = TaskScheduler(
             store=tasks,
             runner=runner,
@@ -408,9 +388,7 @@ async def run_bot(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         scheduler.start()
 
     await bot.set_my_commands(bot_command_list)
-    await bot.set_my_commands(
-        bot_command_list, scope=BotCommandScopeAllPrivateChats()
-    )
+    await bot.set_my_commands(bot_command_list, scope=BotCommandScopeAllPrivateChats())
     try:
         await dp.start_polling(bot)
     finally:
@@ -434,9 +412,7 @@ async def _supervise(cfg: BotConfig, http: aiohttp.ClientSession) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logging.exception(
-                "[%s] crashed, restarting in %.1fs", cfg.name, backoff
-            )
+            logging.exception("[%s] crashed, restarting in %.1fs", cfg.name, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
 
@@ -456,12 +432,8 @@ async def main() -> None:
         # `_supervise` only returns on CancelledError; anything else here is a
         # bug we want to see, not swallow.
         for name, result in zip(bots.keys(), results, strict=True):
-            if isinstance(result, BaseException) and not isinstance(
-                result, asyncio.CancelledError
-            ):
-                logging.error(
-                    "[%s] supervisor exited with %s", name, repr(result)
-                )
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                logging.error("[%s] supervisor exited with %s", name, repr(result))
     finally:
         await http.close()
 

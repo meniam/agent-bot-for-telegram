@@ -78,7 +78,8 @@ async def test_list_all_isolates_users(tmp_path: Path) -> None:
     await store.add(_task(chat_id=99, scope="global", next_run_at=NOW))
 
     own = await store.list_all(10)
-    assert len(own) == 1 and own[0].owner_chat_id == 10
+    assert len(own) == 1
+    assert own[0].owner_chat_id == 10
 
     with_global = await store.list_all(10, include_global=True)
     assert {t.scope for t in with_global} == {"user", "global"}

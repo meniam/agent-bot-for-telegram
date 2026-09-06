@@ -200,7 +200,10 @@ async def test_running_ids_tracked_during_run(tmp_path: Path) -> None:
             return _Outcome()
 
     sched, store = _sched(
-        tmp_path, _ObservingRunner(), _cfg(), running_ids=shared  # type: ignore[arg-type]
+        tmp_path,
+        _ObservingRunner(),
+        _cfg(),
+        running_ids=shared,  # type: ignore[arg-type]
     )
     t = _once_task()
     await store.add(t)
@@ -235,6 +238,7 @@ async def test_oneshot_error_completes_disabled(tmp_path: Path) -> None:
 
         async def run(self, _task: Task, **_: object) -> object:
             """Return an error outcome without raising."""
+
             class _Outcome:
                 """Minimal stand-in for a failed task run outcome."""
 
@@ -265,6 +269,7 @@ async def test_recurring_error_keeps_future_next_run(tmp_path: Path) -> None:
 
         async def run(self, _task: Task, **_: object) -> object:
             """Return an error outcome without raising."""
+
             class _Outcome:
                 """Minimal stand-in for a failed task run outcome."""
 
@@ -431,9 +436,7 @@ async def test_recent_interval_runs_once(tmp_path: Path) -> None:
 async def test_recovery_marks_stale_running_oneshot_error(tmp_path: Path) -> None:
     """Startup recovery turns a stale persisted running one-shot into an error."""
     sched, store = _sched(tmp_path, _RecordingRunner(), _cfg())
-    t = _once_task().model_copy(
-        update={"state": "running", "enabled": True, "next_run_at": None}
-    )
+    t = _once_task().model_copy(update={"state": "running", "enabled": True, "next_run_at": None})
     await store.add(t)
 
     await sched._recover_interrupted_running()
@@ -543,7 +546,8 @@ async def test_loop_death_fires_alert(tmp_path: Path) -> None:
             break
         await asyncio.sleep(0)
 
-    assert sched._loop_task is not None and sched._loop_task.done()
+    assert sched._loop_task is not None
+    assert sched._loop_task.done()
     assert len(deaths) == 1
     assert isinstance(deaths[0], _Boom)
 

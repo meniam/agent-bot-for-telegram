@@ -97,9 +97,7 @@ async def handle(
         decision, feedback = await asyncio.wait_for(fut, timeout=gate._timeout)
     except TimeoutError:
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(
-                chat_id, t.t("plan_timeout"), parse_mode=None
-            )
+            await gate._bot.send_message(chat_id, t.t("plan_timeout"), parse_mode=None)
         return PermissionResultDeny(message=t.t("plan_rejected_default"))
     finally:
         gate._plan_pending.pop(chat_id, None)
@@ -108,13 +106,9 @@ async def handle(
     if decision == "approve":
         gate._cl(chat_id).info("ExitPlanMode: approved → agent continues")
         with contextlib.suppress(Exception):
-            await gate._bot.send_message(
-                chat_id, t.t("plan_started"), parse_mode=None
-            )
+            await gate._bot.send_message(chat_id, t.t("plan_started"), parse_mode=None)
         return PermissionResultAllow()
-    gate._cl(chat_id).info(
-        "ExitPlanMode: rejected (feedback_len=%d)", len(feedback)
-    )
+    gate._cl(chat_id).info("ExitPlanMode: rejected (feedback_len=%d)", len(feedback))
     with contextlib.suppress(Exception):
         if feedback:
             await gate._bot.send_message(
@@ -123,9 +117,7 @@ async def handle(
                 parse_mode=None,
             )
         else:
-            await gate._bot.send_message(
-                chat_id, t.t("plan_rejected_msg"), parse_mode=None
-            )
+            await gate._bot.send_message(chat_id, t.t("plan_rejected_msg"), parse_mode=None)
     if feedback:
         deny_message = (
             "User rejected the plan and provided the following feedback. "
@@ -138,9 +130,7 @@ async def handle(
     return PermissionResultDeny(message=deny_message)
 
 
-async def on_callback(
-    gate: TelegramInteractionGate, callback: CallbackQuery
-) -> None:
+async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) -> None:
     """Resolve a `plan:` Approve/Reject tap by setting the pending future.
 
     No-op for stale callbacks (deletes the orphaned prompt).
@@ -156,14 +146,8 @@ async def on_callback(
         return
 
     msg = callback.message if isinstance(callback.message, Message) else None
-    entry = (
-        gate._plan_pending.get(msg.chat.id) if msg is not None else None
-    )
-    if (
-        entry is None
-        or entry[1] != request_id
-        or entry[0].done()
-    ):
+    entry = gate._plan_pending.get(msg.chat.id) if msg is not None else None
+    if entry is None or entry[1] != request_id or entry[0].done():
         await callback.answer(t.t("callback_outdated"), show_alert=False)
         if msg is not None:
             with contextlib.suppress(Exception):
@@ -185,9 +169,7 @@ async def on_callback(
     await callback.answer()
 
 
-def consume_text(
-    gate: TelegramInteractionGate, chat_id: int, text: str
-) -> bool:
+def consume_text(gate: TelegramInteractionGate, chat_id: int, text: str) -> bool:
     """Resolve a pending plan prompt with a freeform text reply as rejection.
 
     Returns True if a pending, unresolved plan future existed and the text was
@@ -201,8 +183,6 @@ def consume_text(
     if fut.done():
         return False
     feedback = (text or "").strip()
-    gate._cl(chat_id).info(
-        "ExitPlanMode: rejected via text feedback: %r", feedback[:300]
-    )
+    gate._cl(chat_id).info("ExitPlanMode: rejected via text feedback: %r", feedback[:300])
     fut.set_result(("reject", feedback))
     return True

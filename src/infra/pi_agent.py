@@ -244,9 +244,7 @@ class PiRpcProcess:
                     del tail[: len(tail) - _STDERR_TAIL_MAX]
         finally:
             if tail:
-                log.warning(
-                    "PI RPC stderr: %s", tail.decode("utf-8", errors="replace")
-                )
+                log.warning("PI RPC stderr: %s", tail.decode("utf-8", errors="replace"))
 
     def _offer_event(self, event: dict[str, Any]) -> None:
         """Queue an unsolicited event, dropping the oldest if the queue is full."""
@@ -401,9 +399,7 @@ class PiAgentBackend(BaseAgentBackend):
                 self._active.discard(chat_id)
                 session.last_used = time.monotonic()
 
-    async def _next_event_with_watchdog(
-        self, chat_id: int, session: _PiSession
-    ) -> dict[str, Any]:
+    async def _next_event_with_watchdog(self, chat_id: int, session: _PiSession) -> dict[str, Any]:
         """Await the next RPC event under a watchdog timeout.
 
         On ``PI_EVENT_TIMEOUT_SEC`` with no event it emits a post lifecycle
@@ -491,10 +487,7 @@ class PiAgentBackend(BaseAgentBackend):
         event_type = str(event.get("type") or "")
         if event_type == "message_update":
             assistant_event = event.get("assistantMessageEvent")
-            if (
-                isinstance(assistant_event, dict)
-                and assistant_event.get("type") == "text_delta"
-            ):
+            if isinstance(assistant_event, dict) and assistant_event.get("type") == "text_delta":
                 delta = assistant_event.get("delta")
                 return delta if isinstance(delta, str) else None
         tool_event = self._extract_tool_event(event)
@@ -503,9 +496,7 @@ class PiAgentBackend(BaseAgentBackend):
             await self._on_tool_event(chat_id, phase, name, payload)
         return None
 
-    def _extract_tool_event(
-        self, event: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]] | None:
+    def _extract_tool_event(self, event: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
         """Map a ``tool_execution_*`` event to a ``(phase, tool_name, payload)`` tuple.
 
         ``start`` yields ``pre``; ``end`` and ``update`` both yield ``post``
@@ -607,9 +598,7 @@ class PiAgentBackend(BaseAgentBackend):
         """
         if self._transport_factory is not None:
             return self._transport_factory(model)
-        cli_bin = self._cli_bin or cast(
-            "str | None", await asyncio.to_thread(shutil.which, "pi")
-        )
+        cli_bin = self._cli_bin or cast("str | None", await asyncio.to_thread(shutil.which, "pi"))
         if cli_bin is None:
             raise RuntimeError(
                 "PI backend requires the pi CLI. Install PI.dev CLI or set pi_cli_bin."
@@ -749,7 +738,7 @@ class PiAgentBackend(BaseAgentBackend):
         prompt: str,
         *,
         allowed_tools: tuple[str, ...],
-        on_session_path: "Callable[[str], None] | None" = None,
+        on_session_path: Callable[[str], None] | None = None,
         idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """Raise ``NotImplementedError``; PI has no stateless-turn primitive."""
@@ -811,7 +800,7 @@ class PiAgentBackend(BaseAgentBackend):
     async def _state(self, session: _PiSession) -> dict[str, Any]:
         """Fetch live PI state via RPC, caching the last non-empty result on the session."""
         response = await self._request_optional(session, {"type": "get_state"})
-        session.state = response if response else session.state
+        session.state = response or session.state
         return session.state or {}
 
     async def _commands(self, session: _PiSession) -> list[dict[str, Any]]:
@@ -820,9 +809,9 @@ class PiAgentBackend(BaseAgentBackend):
             return session.commands
         response = await self._request_optional(session, {"type": "get_commands"})
         commands = response.get("commands") if isinstance(response, dict) else None
-        session.commands = [
-            c for c in commands if isinstance(c, dict)
-        ] if isinstance(commands, list) else []
+        session.commands = (
+            [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
+        )
         return session.commands
 
     async def _models(self, session: _PiSession) -> tuple[tuple[str, str], ...]:
@@ -833,9 +822,7 @@ class PiAgentBackend(BaseAgentBackend):
         """
         if session.models is not None:
             return session.models
-        response = await self._request_optional(
-            session, {"type": "get_available_models"}
-        )
+        response = await self._request_optional(session, {"type": "get_available_models"})
         raw_models = response.get("models") if isinstance(response, dict) else None
         models: list[tuple[str, str]] = [("", "")]
         if isinstance(raw_models, list):

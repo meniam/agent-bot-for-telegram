@@ -76,9 +76,7 @@ class AclMiddleware(BaseMiddleware):
             if isinstance(event, Message):
                 await deny_access(event, self._ctx)
             elif isinstance(event, CallbackQuery):
-                await event.answer(
-                    self._ctx.tr.t("unauthorized_callback"), show_alert=True
-                )
+                await event.answer(self._ctx.tr.t("unauthorized_callback"), show_alert=True)
             return None
 
         return await handler(event, data)

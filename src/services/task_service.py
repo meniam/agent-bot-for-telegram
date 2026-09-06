@@ -20,7 +20,10 @@ from ..infra.task_types import Task, TaskRun, TaskScope, compute_next_run, parse
 _THREAT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pat, re.IGNORECASE), label)
     for pat, label in (
-        (r"ignore\s+(?:\w+\s+)*(?:previous|all|above|prior)\s+(?:\w+\s+)*instructions", "prompt_injection"),
+        (
+            r"ignore\s+(?:\w+\s+)*(?:previous|all|above|prior)\s+(?:\w+\s+)*instructions",
+            "prompt_injection",
+        ),
         (r"do\s+not\s+tell\s+the\s+user", "deception_hide"),
         (r"system\s+prompt\s+override", "sys_prompt_override"),
         (r"disregard\s+(?:your|all|any)\s+(?:instructions|rules|guidelines)", "disregard_rules"),
@@ -33,6 +36,7 @@ _THREAT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 
 # Zero-width / bidi control characters used to smuggle hidden instructions.
 _INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+
 
 class TaskError(Exception):
     """Base for task-operation failures; ``str(e)`` is user-facing."""
@@ -146,9 +150,7 @@ class TaskService:
 
     async def list(self, chat_id: int) -> list[Task]:
         """Return the caller's tasks, plus global ones when the caller is admin."""
-        return await self._store.list_all(
-            chat_id, include_global=self.is_admin(chat_id)
-        )
+        return await self._store.list_all(chat_id, include_global=self.is_admin(chat_id))
 
     async def get(self, chat_id: int, task_id: str) -> Task:
         """Fetch a visible task or raise `TaskNotFoundError`."""
@@ -179,13 +181,9 @@ class TaskService:
                 task.model_copy(update={"enabled": False, "state": "paused"})
             )
         if action == "resume":
-            nxt = compute_next_run(
-                task.schedule, last_run=task.last_run_at, now=self._now()
-            )
+            nxt = compute_next_run(task.schedule, last_run=task.last_run_at, now=self._now())
             return await self._store.update(
-                task.model_copy(
-                    update={"enabled": True, "state": "scheduled", "next_run_at": nxt}
-                )
+                task.model_copy(update={"enabled": True, "state": "scheduled", "next_run_at": nxt})
             )
         # action == "run" (guarded above)
         return await self._store.update(

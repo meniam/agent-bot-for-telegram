@@ -28,9 +28,7 @@ def _has_fts5() -> bool:
         conn.close()
 
 
-requires_fts5 = pytest.mark.skipif(
-    not _has_fts5(), reason="SQLite build lacks FTS5"
-)
+requires_fts5 = pytest.mark.skipif(not _has_fts5(), reason="SQLite build lacks FTS5")
 
 
 def _record(msg: str, *, role: str | None = None, tool: str | None = None) -> logging.LogRecord:
@@ -472,7 +470,8 @@ def test_search_snippet_wraps_match_in_brackets(tmp_path: Path) -> None:
     _seed_fts(db, via_handler=True)
     out = search_messages(db, "достав")
     assert len(out) == 1
-    assert "[" in out[0]["snippet"] and "]" in out[0]["snippet"]
+    assert "[" in out[0]["snippet"]
+    assert "]" in out[0]["snippet"]
 
 
 @requires_fts5
@@ -521,8 +520,7 @@ def test_search_trigger_reflects_update(tmp_path: Path) -> None:
     _seed_fts(db, via_handler=True)
     conn = sqlite3.connect(db)
     conn.execute(
-        "UPDATE messages SET message = 'новый текст возврата' "
-        "WHERE message LIKE '%доставку%'"
+        "UPDATE messages SET message = 'новый текст возврата' WHERE message LIKE '%доставку%'"
     )
     conn.commit()
     conn.close()

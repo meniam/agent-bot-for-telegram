@@ -56,18 +56,63 @@ _AUDIO_EXT = frozenset({".mp3", ".ogg", ".oga", ".m4a", ".wav", ".opus", ".flac"
 # Full set of HTML tag names Telegram renders in Rich Messages. Raw HTML the
 # agent writes for features without a Markdown syntax (underline, pull quotes,
 # maps, custom emoji, anchors, …) is passed through; everything else is escaped.
-_SAFE_TAGS = frozenset({
-    "a", "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
-    "code", "pre", "mark", "sub", "sup", "tg-spoiler",
-    "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr",
-    "ul", "ol", "li", "input",
-    "blockquote", "aside", "cite", "footer",
-    "table", "caption", "tr", "th", "td",
-    "details", "summary",
-    "figure", "figcaption", "img", "video", "audio",
-    "tg-emoji", "tg-time", "tg-math", "tg-math-block",
-    "tg-map", "tg-collage", "tg-slideshow", "tg-reference",
-})
+_SAFE_TAGS = frozenset(
+    {
+        "a",
+        "b",
+        "strong",
+        "i",
+        "em",
+        "u",
+        "ins",
+        "s",
+        "strike",
+        "del",
+        "code",
+        "pre",
+        "mark",
+        "sub",
+        "sup",
+        "tg-spoiler",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "br",
+        "hr",
+        "ul",
+        "ol",
+        "li",
+        "input",
+        "blockquote",
+        "aside",
+        "cite",
+        "footer",
+        "table",
+        "caption",
+        "tr",
+        "th",
+        "td",
+        "details",
+        "summary",
+        "figure",
+        "figcaption",
+        "img",
+        "video",
+        "audio",
+        "tg-emoji",
+        "tg-time",
+        "tg-math",
+        "tg-math-block",
+        "tg-map",
+        "tg-collage",
+        "tg-slideshow",
+        "tg-reference",
+    }
+)
 
 _TAG_NAME_RE = re.compile(r"</?\s*([a-zA-Z][a-zA-Z0-9-]*)")
 
@@ -109,10 +154,7 @@ def _media_block(node: SyntaxTreeNode) -> str | None:
         return None
     caption = str(node.attrGet("title") or "").strip()
     if caption:
-        return (
-            f"<figure>{media}"
-            f"<figcaption>{html.escape(caption)}</figcaption></figure>"
-        )
+        return f"<figure>{media}<figcaption>{html.escape(caption)}</figcaption></figure>"
     return media
 
 
@@ -142,19 +184,19 @@ def _render(node: SyntaxTreeNode) -> str:
         return "\n"
 
     if t == "strong":
-        return f'<b>{"".join(_render(c) for c in ch)}</b>'
+        return f"<b>{''.join(_render(c) for c in ch)}</b>"
 
     if t == "em":
-        return f'<i>{"".join(_render(c) for c in ch)}</i>'
+        return f"<i>{''.join(_render(c) for c in ch)}</i>"
 
     if t == "s":
-        return f'<s>{"".join(_render(c) for c in ch)}</s>'
+        return f"<s>{''.join(_render(c) for c in ch)}</s>"
 
     if t == "spoiler":
-        return f'<tg-spoiler>{"".join(_render(c) for c in ch)}</tg-spoiler>'
+        return f"<tg-spoiler>{''.join(_render(c) for c in ch)}</tg-spoiler>"
 
     if t == "mark":
-        return f'<mark>{"".join(_render(c) for c in ch)}</mark>'
+        return f"<mark>{''.join(_render(c) for c in ch)}</mark>"
 
     if t == "math_inline":
         return f"<tg-math>{html.escape(node.content)}</tg-math>"
@@ -169,9 +211,7 @@ def _render(node: SyntaxTreeNode) -> str:
         lang_raw = (node.info or "").split()[0] if (node.info or "").strip() else ""
         code = html.escape(node.content.rstrip("\n"))
         inner = (
-            f'<code class="language-{html.escape(lang_raw)}">{code}</code>'
-            if lang_raw
-            else code
+            f'<code class="language-{html.escape(lang_raw)}">{code}</code>' if lang_raw else code
         )
         return f"<pre>{inner}</pre>\n\n"
 
@@ -184,7 +224,7 @@ def _render(node: SyntaxTreeNode) -> str:
         return f"<h{level}>{inner}</h{level}>\n\n"
 
     if t == "paragraph":
-        return f'{"".join(_render(c) for c in ch)}\n\n'
+        return f"{''.join(_render(c) for c in ch)}\n\n"
 
     if t == "bullet_list":
         return f"<ul>{''.join(_render_list_item(c) for c in ch)}</ul>\n\n"
@@ -249,11 +289,7 @@ def _render(node: SyntaxTreeNode) -> str:
         raw = node.content
         if _TASK_CHECKBOX_RE.search(raw):
             checked = "checked" in raw.lower()
-            return (
-                '<input type="checkbox" checked>'
-                if checked
-                else '<input type="checkbox">'
-            )
+            return '<input type="checkbox" checked>' if checked else '<input type="checkbox">'
         return _passthrough_safe_tags(raw)
 
     if ch:
@@ -305,13 +341,10 @@ def _render_footnotes(footnotes: list[SyntaxTreeNode]) -> str:
 # never a blockquote — but CommonMark makes the space after `>` optional, so the
 # parser would quote it. Escape the marker so it renders literally. Real
 # blockquotes (`> text`) and nested ones (`>>`) are untouched.
-_FAUX_QUOTE_RE = re.compile(
-    r"^(\s*(?:[-*+]\s+|\d+[.)]\s+)?)>(?=[0-9=])", re.MULTILINE
-)
+_FAUX_QUOTE_RE = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+)?)>(?=[0-9=])", re.MULTILINE)
 # Fenced code blocks must be left verbatim — a backslash escape would print
 # literally inside them.
-_FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:\n[ \t]*\1[ \t]*$|\Z)",
-                       re.MULTILINE | re.DOTALL)
+_FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:\n[ \t]*\1[ \t]*$|\Z)", re.MULTILINE | re.DOTALL)
 
 
 def _escape_faux_quotes(text: str) -> str:
@@ -352,13 +385,40 @@ _STRIP_INNER_NL = ("<table>", "<tg-collage>", "<tg-slideshow>")
 # into `<br>` would double every gap. Only newlines between inline content
 # (paragraph soft/hard breaks) survive as `<br>`.
 _BLOCK_TAGS = (
-    "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "li", "blockquote",
-    "aside", "pre", "table", "tr", "th", "td", "thead", "tbody", "caption",
-    "hr", "footer", "figure", "figcaption", "details", "summary",
-    "tg-math-block", "tg-collage", "tg-slideshow",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "aside",
+    "pre",
+    "table",
+    "tr",
+    "th",
+    "td",
+    "thead",
+    "tbody",
+    "caption",
+    "hr",
+    "footer",
+    "figure",
+    "figcaption",
+    "details",
+    "summary",
+    "tg-math-block",
+    "tg-collage",
+    "tg-slideshow",
     # Media is standalone-block-only in Rich Messages; structural newlines around
     # it must drop, not become <br> (which corrupts the media block).
-    "img", "video", "audio",
+    "img",
+    "video",
+    "audio",
 )
 _BLOCK_TAG_ALT = "|".join(sorted(_BLOCK_TAGS, key=len, reverse=True))
 # A newline that directly follows a block tag's `>` or directly precedes a block

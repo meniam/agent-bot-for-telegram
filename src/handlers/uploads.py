@@ -50,9 +50,7 @@ async def _save_upload(
         )
         return None
     # build_path creates the per-chat dir (mkdir) — keep that off the event loop.
-    path = await asyncio.to_thread(
-        ctx.uploads.build_path, message.chat.id, file_id, original_name
-    )
+    path = await asyncio.to_thread(ctx.uploads.build_path, message.chat.id, file_id, original_name)
     try:
         # Open/close off the event loop; the download itself streams async.
         f = cast("BinaryIO", await asyncio.to_thread(path.open, "wb"))
@@ -77,9 +75,7 @@ async def _save_upload(
     return PendingFile(path=path, kind=kind, name=original_name)
 
 
-async def _fire_for_upload(
-    ctx: BotContext, message: Message, cl: logging.Logger
-) -> None:
+async def _fire_for_upload(ctx: BotContext, message: Message, cl: logging.Logger) -> None:
     """Single message → fire immediately. Album → debounce via AlbumDebouncer."""
     caption = (message.caption or "").strip()
 
@@ -91,9 +87,7 @@ async def _fire_for_upload(
     await ctx.album.schedule(message, caption, cl, _on_fire)
 
 
-async def handle_photo(
-    message: Message, ctx: BotContext, cl: logging.Logger, **_: object
-) -> None:
+async def handle_photo(message: Message, ctx: BotContext, cl: logging.Logger, **_: object) -> None:
     """Save the largest photo size, queue it, and fire the agent."""
     await ctx.gate.cancel_active_aq(message.chat.id)
     if ctx.uploads is None:

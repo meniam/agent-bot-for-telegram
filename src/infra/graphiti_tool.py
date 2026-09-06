@@ -68,7 +68,7 @@ class GraphitiProxy:
         return httpx.AsyncClient(headers=headers)
 
     @classmethod
-    async def discover(cls, url: str, host: str) -> "GraphitiProxy":
+    async def discover(cls, url: str, host: str) -> GraphitiProxy:
         """Connect once and snapshot the upstream tool list."""
         proxy = cls(url=url, host=host)
         async with (
@@ -132,7 +132,7 @@ def _block_to_dict(block: Any) -> dict[str, Any]:
 
 def make_graphiti_handler(
     chat_id: int, proxy: GraphitiProxy, spec: _ToolSpec
-) -> "Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]":
+) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
     """Build the tool handler that pins this chat's namespace, then forwards."""
     gid = str(chat_id)
 
@@ -147,9 +147,7 @@ def make_graphiti_handler(
         try:
             return await proxy.call(spec.name, scoped)
         except Exception as e:  # never surface a raw traceback to the model
-            log.exception(
-                "graphiti tool %s failed (chat %s)", spec.name, chat_id
-            )
+            log.exception("graphiti tool %s failed (chat %s)", spec.name, chat_id)
             text = json.dumps(
                 {"success": False, "error": f"{type(e).__name__}: {e}"},
                 ensure_ascii=False,
@@ -162,11 +160,7 @@ def make_graphiti_handler(
 def build_graphiti_server(chat_id: int, proxy: GraphitiProxy) -> McpSdkServerConfig:
     """Build the in-process MCP server exposing Graphiti tools for ``chat_id``."""
     tools = [
-        tool(spec.name, spec.description, spec.schema)(
-            make_graphiti_handler(chat_id, proxy, spec)
-        )
+        tool(spec.name, spec.description, spec.schema)(make_graphiti_handler(chat_id, proxy, spec))
         for spec in proxy.specs
     ]
-    return create_sdk_mcp_server(
-        name=GRAPHITI_SERVER_NAME, version="1.0.0", tools=tools
-    )
+    return create_sdk_mcp_server(name=GRAPHITI_SERVER_NAME, version="1.0.0", tools=tools)

@@ -11,6 +11,7 @@ from src.ui.markdown import (
 
 # --- to_rich_html: line breaks for sendRichMessage ---
 
+
 def test_rich_html_paragraphs_become_br() -> None:
     """Render a blank-line paragraph break as a double ``<br>``."""
     assert to_rich_html("a\n\nb") == "a<br><br>b"
@@ -46,8 +47,7 @@ def test_rich_html_gallery_has_no_inner_br() -> None:
     out = to_rich_html(raw)
     assert "<br>" not in out
     assert (
-        out
-        == "<tg-slideshow>"
+        out == "<tg-slideshow>"
         '<img src="https://h/a.jpg"/>'
         '<img src="https://h/b.jpg"/>'
         "<figcaption>Cap</figcaption></tg-slideshow>"
@@ -62,6 +62,7 @@ def test_rich_html_standalone_images_have_no_br() -> None:
 
 
 # --- to_html: inline formatting ---
+
 
 def test_bold() -> None:
     """Convert ``**text**`` to a ``<b>`` element."""
@@ -90,6 +91,7 @@ def test_inline_code_escapes_html() -> None:
 
 # --- to_html: code blocks ---
 
+
 def test_fenced_code_block_with_lang() -> None:
     """Tag a fenced block's language as a ``language-*`` class."""
     out = to_html("```python\nfoo()\n```")
@@ -109,6 +111,7 @@ def test_code_block_escapes_html() -> None:
 
 
 # --- to_html: lists ---
+
 
 def test_bullet_list_html() -> None:
     """Render a bullet list as ``<ul>`` with ``<li>`` items."""
@@ -152,6 +155,7 @@ def test_list_with_bold_item() -> None:
 
 
 # --- to_html: headings ---
+
 
 def test_heading_h1() -> None:
     """Render a level-1 heading as ``<h1>``."""
@@ -233,6 +237,7 @@ def test_table_alignment() -> None:
 
 # --- to_html: mark / math / footnotes / media ---
 
+
 def test_mark_syntax() -> None:
     """Convert ``==text==`` to a ``<mark>`` element."""
     assert to_html("==important==") == "<mark>important</mark>"
@@ -275,16 +280,12 @@ def test_image_media_block() -> None:
 
 def test_video_media_block() -> None:
     """Render a remote ``.mp4`` source as a ``<video>`` element."""
-    assert '<video src="https://host/v.mp4"></video>' in to_html(
-        "![](https://host/v.mp4)"
-    )
+    assert '<video src="https://host/v.mp4"></video>' in to_html("![](https://host/v.mp4)")
 
 
 def test_audio_media_block() -> None:
     """Render a remote ``.mp3`` source as an ``<audio>`` element."""
-    assert '<audio src="https://host/a.mp3"></audio>' in to_html(
-        "![](https://host/a.mp3)"
-    )
+    assert '<audio src="https://host/a.mp3"></audio>' in to_html("![](https://host/a.mp3)")
 
 
 def test_local_image_falls_back_to_alt() -> None:
@@ -305,6 +306,7 @@ def test_aside_passthrough() -> None:
 
 # --- to_html: blockquote ---
 
+
 def test_blockquote() -> None:
     """Render a quoted line as a ``<blockquote>`` element."""
     out = to_html("> quote text")
@@ -312,6 +314,7 @@ def test_blockquote() -> None:
 
 
 # --- to_html: links ---
+
 
 def test_link() -> None:
     """Render a Markdown link as an ``<a href>`` element."""
@@ -327,6 +330,7 @@ def test_link_escapes_special_chars_in_text() -> None:
 
 # --- to_html: plain text escaping ---
 
+
 def test_html_special_chars_escaped() -> None:
     """Escape ``&``, ``<`` and ``>`` in plain text."""
     out = to_html("a & b < c > d")
@@ -336,6 +340,7 @@ def test_html_special_chars_escaped() -> None:
 
 
 # --- format_quote ---
+
 
 def test_format_quote_prefixes_each_line() -> None:
     """Prefix every line of the input with ``> ``."""
@@ -355,6 +360,7 @@ def test_format_quote_empty_string() -> None:
 
 
 # --- audio_filename ---
+
 
 def test_audio_filename_voice() -> None:
     """Name a voice message ``voice.ogg``."""

@@ -128,9 +128,7 @@ class SessionStore:
             log.exception("session store: failed to open %s", path)
             return None
         try:
-            row = conn.execute(
-                "SELECT current_session_id FROM chat_meta WHERE id = 0"
-            ).fetchone()
+            row = conn.execute("SELECT current_session_id FROM chat_meta WHERE id = 0").fetchone()
         except Exception:
             log.exception("session store: failed to read current of %s", path)
             return None
@@ -156,8 +154,7 @@ class SessionStore:
         try:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT id, title, auto_titled, created_at, last_used "
-                "FROM sessions WHERE id = ?",
+                "SELECT id, title, auto_titled, created_at, last_used FROM sessions WHERE id = ?",
                 (sid,),
             ).fetchone()
         except Exception:
@@ -265,9 +262,7 @@ class SessionStore:
         conn = connect(self._path(chat_id))
         try:
             conn.execute("DELETE FROM sessions WHERE id = ?", (sid,))
-            row = conn.execute(
-                "SELECT current_session_id FROM chat_meta WHERE id = 0"
-            ).fetchone()
+            row = conn.execute("SELECT current_session_id FROM chat_meta WHERE id = 0").fetchone()
             current = row[0] if row is not None else None
             if current == sid:
                 latest = conn.execute(
@@ -303,4 +298,3 @@ class SessionStore:
     async def touch(self, chat_id: int, sid: str) -> None:
         """Update a session's ``last_used`` timestamp to now."""
         await asyncio.to_thread(self._touch_sync, chat_id, sid)
-

@@ -49,7 +49,7 @@ class Translator:
         if kwargs:
             try:
                 return s.format(**kwargs)
-            except (KeyError, IndexError):
+            except KeyError, IndexError:
                 return s
         return s
 

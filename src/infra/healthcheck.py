@@ -20,9 +20,7 @@ DEFAULT_PATH = Path("/app/var/scheduler_heartbeat")
 DEFAULT_MAX_AGE = 120.0
 
 
-def check(
-    path: Path, max_age: float, now: datetime | None = None
-) -> tuple[str, float | None]:
+def check(path: Path, max_age: float, now: datetime | None = None) -> tuple[str, float | None]:
     """Classify the heartbeat as ``ok`` / ``stale`` / ``missing``.
 
     Returns the status and the beat's age in seconds (``None`` when missing or

@@ -104,9 +104,7 @@ def _post_process(state: StateInline, delimiters: list[Delimiter]) -> None:
     while lone_markers:
         i = lone_markers.pop()
         j = i + 1
-        while (j < len(state.tokens)) and (
-            state.tokens[j].type == "spoiler_close"
-        ):
+        while (j < len(state.tokens)) and (state.tokens[j].type == "spoiler_close"):
             j += 1
         j -= 1
         if i != j:

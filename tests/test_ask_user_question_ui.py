@@ -23,10 +23,7 @@ def test_selected_option_lines_are_marked() -> None:
 
 def test_button_rows_use_compact_four_column_chunks() -> None:
     """Compact option buttons split into predictable rows."""
-    buttons = [
-        InlineKeyboardButton(text=str(i), callback_data=f"cb:{i}")
-        for i in range(1, 6)
-    ]
+    buttons = [InlineKeyboardButton(text=str(i), callback_data=f"cb:{i}") for i in range(1, 6)]
 
     rows = _button_rows(buttons)
 

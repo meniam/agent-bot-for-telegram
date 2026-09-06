@@ -29,7 +29,8 @@ def test_format_context_usage_includes_totals() -> None:
     # Sorted desc by tokens; empty category dropped.
     tools_pos = out.find("tools")
     system_pos = out.find("system")
-    assert tools_pos != -1 and system_pos != -1
+    assert tools_pos != -1
+    assert system_pos != -1
     assert tools_pos < system_pos
     assert "empty" not in out
 
@@ -60,7 +61,9 @@ def test_format_mcp_status_groups_by_state() -> None:
         ]
     }
     out = format_mcp_status(status, tr)
-    assert "alpha" in out and "beta" in out and "gamma" in out
+    assert "alpha" in out
+    assert "beta" in out
+    assert "gamma" in out
     # Connected group renders before failed group.
     assert out.find("alpha") < out.find("beta")
     # Error string surfaces.
@@ -84,7 +87,8 @@ def test_format_server_info_lists_commands() -> None:
         "output_style": "default",
     }
     out = format_server_info(info, tr)
-    assert "/foo" in out and "/bar" in out
+    assert "/foo" in out
+    assert "/bar" in out
     assert "default" in out
 
 
@@ -100,5 +104,6 @@ def test_format_server_info_caps_command_list_at_30() -> None:
     tr = Translator("en")
     info = {"commands": [{"name": f"c{i}"} for i in range(50)]}
     out = format_server_info(info, tr)
-    assert "/c0" in out and "/c29" in out
+    assert "/c0" in out
+    assert "/c29" in out
     assert "/c30" not in out

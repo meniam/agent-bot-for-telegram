@@ -174,9 +174,7 @@ class CodexAgentBackend(BaseAgentBackend):
             config_cls = getattr(module, "CodexConfig", None)
             codex_bin = await asyncio.to_thread(self._resolve_codex_bin)
             if config_cls is not None and codex_bin is not None:
-                codex = module.AsyncCodex(
-                    config=config_cls(codex_bin=codex_bin, cwd=self._cwd)
-                )
+                codex = module.AsyncCodex(config=config_cls(codex_bin=codex_bin, cwd=self._cwd))
             else:
                 if config_cls is not None and self._cwd is not None:
                     codex = module.AsyncCodex(config=config_cls(cwd=self._cwd))
@@ -260,9 +258,7 @@ class CodexAgentBackend(BaseAgentBackend):
         injected (tests).
         """
         sandbox_name = (
-            "full_access"
-            if self._sandbox_name == "danger_full_access"
-            else self._sandbox_name
+            "full_access" if self._sandbox_name == "danger_full_access" else self._sandbox_name
         )
         if self._codex_factory is not None:
             return sandbox_name
@@ -359,10 +355,7 @@ class CodexAgentBackend(BaseAgentBackend):
         try:
             return await asyncio.wait_for(turn, timeout=self._event_timeout)
         except TimeoutError:
-            msg = (
-                "Codex run timed out after "
-                f"{self._event_timeout:.0f}s waiting for completion"
-            )
+            msg = f"Codex run timed out after {self._event_timeout:.0f}s waiting for completion"
             log.warning("%s (chat_id=%s)", msg, chat_id)
             session = self._sessions.get(chat_id)
             await self._emit_lifecycle(
@@ -449,10 +442,7 @@ class CodexAgentBackend(BaseAgentBackend):
         Raises ``AgentEventStreamTimeout``; called when a streamed turn's next
         event does not arrive within ``CODEX_RUN_TIMEOUT_SEC``.
         """
-        msg = (
-            "Codex run timed out after "
-            f"{self._event_timeout:.0f}s waiting for completion"
-        )
+        msg = f"Codex run timed out after {self._event_timeout:.0f}s waiting for completion"
         log.warning("%s (chat_id=%s)", msg, chat_id)
         session = self._sessions.get(chat_id)
         await self._emit_lifecycle(
@@ -587,9 +577,7 @@ class CodexAgentBackend(BaseAgentBackend):
             return [e for e in result["events"] if isinstance(e, dict)]
         return []
 
-    async def handle_app_server_event(
-        self, chat_id: int, event: dict[str, Any]
-    ) -> str | None:
+    async def handle_app_server_event(self, chat_id: int, event: dict[str, Any]) -> str | None:
         """Normalize a Codex app-server event.
 
         Returns assistant text deltas when present and mirrors tool lifecycle
@@ -826,7 +814,7 @@ class CodexAgentBackend(BaseAgentBackend):
         prompt: str,
         *,
         allowed_tools: tuple[str, ...],
-        on_session_path: "Callable[[str], None] | None" = None,
+        on_session_path: Callable[[str], None] | None = None,
         idle_timeout_sec: int | None = None,
     ) -> EphemeralResult:
         """Raise ``NotImplementedError``; Codex has no stateless-turn primitive."""

@@ -38,8 +38,10 @@ async def test_ordinal_is_creation_order(tmp_path: Path) -> None:
     second = await store.create(1)
     o1 = await store.get_by_ordinal(1, 1)
     o2 = await store.get_by_ordinal(1, 2)
-    assert o1 is not None and o1.id == first.id
-    assert o2 is not None and o2.id == second.id
+    assert o1 is not None
+    assert o1.id == first.id
+    assert o2 is not None
+    assert o2.id == second.id
     assert await store.get_by_ordinal(1, 3) is None
     assert await store.get_by_ordinal(1, 0) is None
 
@@ -52,7 +54,8 @@ async def test_set_current_via_switch(tmp_path: Path) -> None:
     await store.set_current(1, first.id)
     assert await store.current_id(1) == first.id
     current = await store.current(1)
-    assert current is not None and current.id == first.id
+    assert current is not None
+    assert current.id == first.id
 
 
 async def test_set_title_marks_auto_titled(tmp_path: Path) -> None:
@@ -191,8 +194,10 @@ async def test_ordinals_shift_after_delete(tmp_path: Path) -> None:
     # remaining ordered by creation: first(1), third(2)
     o1 = await store.get_by_ordinal(1, 1)
     o2 = await store.get_by_ordinal(1, 2)
-    assert o1 is not None and o1.id == first.id
-    assert o2 is not None and o2.id == third.id
+    assert o1 is not None
+    assert o1.id == first.id
+    assert o2 is not None
+    assert o2.id == third.id
     assert await store.get_by_ordinal(1, 3) is None
 
 

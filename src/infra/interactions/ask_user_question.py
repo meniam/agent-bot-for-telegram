@@ -46,9 +46,7 @@ async def handle(
     t = gate._t
     questions = tool_input.get("questions") or []
     if not isinstance(questions, list) or not questions:
-        return PermissionResultDeny(
-            message="AskUserQuestion called with no questions."
-        )
+        return PermissionResultDeny(message="AskUserQuestion called with no questions.")
 
     collected: list[tuple[str, list[str] | None]] = []
     # Fresh start for this turn — drop any leftover abort flag from a
@@ -61,9 +59,7 @@ async def handle(
                 # questions as skipped so Claude knows what's missing.
                 for remaining in questions[qidx:]:
                     if isinstance(remaining, dict):
-                        collected.append(
-                            (str(remaining.get("question", "")), None)
-                        )
+                        collected.append((str(remaining.get("question", "")), None))
                 break
             if not isinstance(q, dict):
                 continue
@@ -71,9 +67,7 @@ async def handle(
                 answers = await _ask_one(gate, chat_id, qidx, len(questions), q)
             except TimeoutError:
                 with contextlib.suppress(Exception):
-                    await gate._bot.send_message(
-                        chat_id, t.t("aq_timeout"), parse_mode=None
-                    )
+                    await gate._bot.send_message(chat_id, t.t("aq_timeout"), parse_mode=None)
                 return PermissionResultDeny(
                     message=(
                         "User did not answer the AskUserQuestion prompt in time. "
@@ -128,6 +122,7 @@ async def _ask_one(
     prefix = f"❓ [{qidx + 1}/{qtotal}]"
     if header:
         prefix = f"{prefix} {header}"
+
     def build_text() -> str:
         """Build the visible question body with full option labels."""
         session = gate._aq.get(request_id)
@@ -199,9 +194,7 @@ async def _ask_one(
 
     if picked_idx is None:
         return None
-    return [
-        str(options[i].get("label", "")) for i in picked_idx if 0 <= i < len(options)
-    ]
+    return [str(options[i].get("label", "")) for i in picked_idx if 0 <= i < len(options)]
 
 
 def _option_lines(options: list[Any], selected: set[int]) -> list[str]:
@@ -224,9 +217,7 @@ def _button_rows(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboar
     return [buttons[i : i + width] for i in range(0, len(buttons), width)]
 
 
-async def on_callback(
-    gate: TelegramInteractionGate, callback: CallbackQuery
-) -> None:
+async def on_callback(gate: TelegramInteractionGate, callback: CallbackQuery) -> None:
     """Handle an `aq:` tap and advance the question's selection state.
 
     An option tap toggles (multi-select, redrawing the keyboard) or resolves
@@ -255,9 +246,7 @@ async def on_callback(
     if callback.from_user is None or callback.message is None:
         await callback.answer()
         return
-    actual_chat_id = (
-        callback.message.chat.id if isinstance(callback.message, Message) else None
-    )
+    actual_chat_id = callback.message.chat.id if isinstance(callback.message, Message) else None
     if actual_chat_id != session.chat_id:
         await callback.answer(t.t("unauthorized_callback"), show_alert=True)
         return
@@ -268,12 +257,11 @@ async def on_callback(
             return
         picked = sorted(session.selected)
         picks = [
-            str(session.options[i].get("label", "")) for i in picked
+            str(session.options[i].get("label", ""))
+            for i in picked
             if 0 <= i < len(session.options)
         ]
-        gate._cl(session.chat_id).info(
-            "AskUserQuestion (multi) picked: %s", picks
-        )
+        gate._cl(session.chat_id).info("AskUserQuestion (multi) picked: %s", picks)
         session.fut.set_result(picked)
         await callback.answer(t.t("callback_received"))
         return
@@ -295,9 +283,7 @@ async def on_callback(
 
     if not session.multi:
         label = str(session.options[idx].get("label", ""))
-        gate._cl(session.chat_id).info(
-            "AskUserQuestion picked: %r", label
-        )
+        gate._cl(session.chat_id).info("AskUserQuestion picked: %r", label)
         session.fut.set_result([idx])
         await callback.answer(t.t("callback_received"))
         return

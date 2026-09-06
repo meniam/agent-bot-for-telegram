@@ -142,9 +142,7 @@ class TaskRunner:
                         wait_done = self._now()
                         log.info("task %s: workdir lock acquired", task.id)
                         outcome = await self._execute(task)
-                        outcome.serialized_wait_ms = self._duration_ms(
-                            wait_started, wait_done
-                        )
+                        outcome.serialized_wait_ms = self._duration_ms(wait_started, wait_done)
                 else:
                     outcome = await self._execute(task)
                     outcome.serialized_wait_ms = 0
@@ -154,9 +152,7 @@ class TaskRunner:
                 if outcome.status == "ok" and outcome.output.strip():
                     delivery_started = self._now()
                     delivery = await self._deliver(task, outcome.output)
-                    outcome.delivery_ms = self._duration_ms(
-                        delivery_started, self._now()
-                    )
+                    outcome.delivery_ms = self._duration_ms(delivery_started, self._now())
                     outcome.delivered_to = delivery.delivered_to
                     outcome.delivery_errors = delivery.errors
                     outcome.delivery_status = delivery.status
@@ -348,9 +344,7 @@ class TaskRunner:
         return (proc.returncode or 0, text.strip())
 
     @staticmethod
-    async def _read_capped(
-        stream: asyncio.StreamReader | None, cap: int
-    ) -> tuple[bytes, bool]:
+    async def _read_capped(stream: asyncio.StreamReader | None, cap: int) -> tuple[bytes, bool]:
         """Read up to ``cap`` bytes from ``stream``; return (data, hit_cap)."""
         if stream is None:
             return (b"", False)
@@ -436,11 +430,7 @@ class TaskRunner:
         Global tasks broadcast to `broadcast_targets`; user tasks go to the
         owner. A failure to one chat is logged and does not stop the rest.
         """
-        targets = (
-            broadcast_targets(self._cfg)
-            if task.scope == "global"
-            else [task.owner_chat_id]
-        )
+        targets = broadcast_targets(self._cfg) if task.scope == "global" else [task.owner_chat_id]
         delivered: list[int] = []
         errors: dict[str, str] = {}
         for chat_id in targets:
@@ -491,9 +481,7 @@ class TaskRunner:
             kind=task.kind,
             started_at=outcome.started_at,
             finished_at=outcome.finished_at,
-            duration_ms=int(
-                (outcome.finished_at - outcome.started_at).total_seconds() * 1000
-            ),
+            duration_ms=int((outcome.finished_at - outcome.started_at).total_seconds() * 1000),
             status=outcome.status,
             exit_code=outcome.exit_code,
             output=outcome.output,
@@ -521,8 +509,7 @@ class TaskRunner:
             await self._store.append_history(run)
         except Exception:
             log.critical(
-                "task %s: history append failed status=%s duration=%d output_chars=%d "
-                "error=%r",
+                "task %s: history append failed status=%s duration=%d output_chars=%d error=%r",
                 task.id,
                 run.status,
                 run.duration_ms,

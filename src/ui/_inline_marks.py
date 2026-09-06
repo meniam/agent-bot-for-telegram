@@ -122,9 +122,7 @@ def _make_rule(marker: str, node_type: str, tag: str) -> tuple[_RuleFn, _PostFn]
         while lone_markers:
             i = lone_markers.pop()
             j = i + 1
-            while (j < len(state.tokens)) and (
-                state.tokens[j].type == close_type
-            ):
+            while (j < len(state.tokens)) and (state.tokens[j].type == close_type):
                 j += 1
             j -= 1
             if i != j:

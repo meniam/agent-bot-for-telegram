@@ -105,9 +105,7 @@ class TelegramInteractionGate:
         # button message is sent successfully; we use it to delete the
         # prompt on click / timeout so the chat does not pile up with stale
         # permission requests.
-        self._pending: dict[
-            str, tuple[asyncio.Future[str], str, int, int | None]
-        ] = {}
+        self._pending: dict[str, tuple[asyncio.Future[str], str, int, int | None]] = {}
         # AskUserQuestion sessions: request_id -> session state.
         # Keyed by a short token embedded in callback_data (`aq:<rid>:...`).
         self._aq: dict[str, _AQSession] = {}
@@ -118,9 +116,7 @@ class TelegramInteractionGate:
         # ExitPlanMode sessions per chat: chat_id -> (future, request_id,
         # prompt message id). Future resolves to ("approve", "") on click,
         # ("reject", feedback or "") on Reject or on freeform text reply.
-        self._plan_pending: dict[
-            int, tuple[asyncio.Future[tuple[str, str]], str, int]
-        ] = {}
+        self._plan_pending: dict[int, tuple[asyncio.Future[tuple[str, str]], str, int]] = {}
 
     # ----- shared helpers -----
 

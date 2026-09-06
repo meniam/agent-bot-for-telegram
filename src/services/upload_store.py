@@ -70,9 +70,7 @@ class UploadStore:
 
 def format_attachment_prompt(items: list[PendingFile], user_text: str) -> str:
     """Wrap pending attachments into a prompt block Claude can act on."""
-    lines = [
-        "The user attached the following files (use the Read tool to inspect them):"
-    ]
+    lines = ["The user attached the following files (use the Read tool to inspect them):"]
     for i, it in enumerate(items, 1):
         lines.append(f"  {i}. {it.path} ({it.kind}, original name: {it.name})")
     body = "\n".join(lines)

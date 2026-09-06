@@ -40,9 +40,7 @@ def _mode_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
         label = _mode_label(ctx, m)
         if m == current:
             label = f"● {label}"
-        rows.append(
-            [InlineKeyboardButton(text=label, callback_data=f"mode:{chat_id}:{m}")]
-        )
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"mode:{chat_id}:{m}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -55,15 +53,11 @@ def _model_keyboard(ctx: BotContext, chat_id: int) -> InlineKeyboardMarkup:
         is_current = (mid == current) or (mid == "" and current is None)
         if is_current:
             text = f"● {text}"
-        rows.append(
-            [InlineKeyboardButton(text=text, callback_data=f"model:{chat_id}:{mid}")]
-        )
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"model:{chat_id}:{mid}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _apply_mode(
-    ctx: BotContext, message: Message, mode: str, cl: logging.Logger
-) -> None:
+async def _apply_mode(ctx: BotContext, message: Message, mode: str, cl: logging.Logger) -> None:
     """Push ``mode`` to the backend and confirm, or report the failure."""
     try:
         await ctx.agent.set_permission_mode(message.chat.id, mode)
@@ -148,9 +142,7 @@ async def set_mode_cmd(
         if arg not in mode_values:
             await send_md(
                 message,
-                ctx.tr.t(
-                    "mode_invalid", mode=arg, valid=", ".join(mode_values)
-                ),
+                ctx.tr.t("mode_invalid", mode=arg, valid=", ".join(mode_values)),
             )
             return
         await _apply_mode(ctx, message, arg, cl)
@@ -185,15 +177,9 @@ async def set_model_cmd(
     if ctx.agent.provider == "pi":
         with contextlib.suppress(Exception):
             await ctx.agent.get_server_info(message.chat.id)
-    current = ctx.agent.current_model(message.chat.id) or ctx.tr.t(
-        "model_default_label"
-    )
+    current = ctx.agent.current_model(message.chat.id) or ctx.tr.t("model_default_label")
     await message.answer(
-        to_html(
-            ctx.tr.t(
-                "model_pick", provider=ctx.agent.provider, current=current
-            )
-        ),
+        to_html(ctx.tr.t("model_pick", provider=ctx.agent.provider, current=current)),
         parse_mode=ParseMode.HTML,
         reply_markup=_model_keyboard(ctx, message.chat.id),
     )

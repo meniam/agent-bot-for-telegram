@@ -139,6 +139,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     _ensure_fts(conn)
     return conn
 
+
 _UPSERT_SESSION = """
 INSERT INTO sessions (id, title, auto_titled, created_at, last_used, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -166,7 +167,7 @@ class SqliteChatLogHandler(logging.Handler):
     def __init__(
         self,
         db_path: Path,
-        session_of: "Callable[[], Session | None] | None" = None,
+        session_of: Callable[[], Session | None] | None = None,
     ) -> None:
         """Open ``db_path`` and resolve the current session via ``session_of``."""
         super().__init__()
@@ -199,9 +200,7 @@ class SqliteChatLogHandler(logging.Handler):
                             record.created,
                         ),
                     )
-            created_at = _dt.datetime.fromtimestamp(record.created).isoformat(
-                timespec="seconds"
-            )
+            created_at = _dt.datetime.fromtimestamp(record.created).isoformat(timespec="seconds")
             self._conn.execute(
                 _INSERT_MESSAGE,
                 (

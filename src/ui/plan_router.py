@@ -61,9 +61,7 @@ class PlanRouter:
         try:
             await self._agent.set_permission_mode(message.chat.id, "plan")
         except Exception as e:
-            self._glog.exception(
-                "[%s] set_permission_mode plan failed", self._bot_name
-            )
+            self._glog.exception("[%s] set_permission_mode plan failed", self._bot_name)
             cl.exception("plan mode engage failed: %s", e)
             await send_md(
                 message,

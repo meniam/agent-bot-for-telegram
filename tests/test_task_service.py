@@ -159,10 +159,12 @@ async def test_act_pause_resume_run_rm(tmp_path: Path) -> None:
     task = await svc.create(USER, schedule_text="every 1h", prompt="x")
 
     paused = await svc.act(USER, "pause", task.id)
-    assert paused.enabled is False and paused.state == "paused"
+    assert paused.enabled is False
+    assert paused.state == "paused"
 
     resumed = await svc.act(USER, "resume", task.id)
-    assert resumed.enabled is True and resumed.state == "scheduled"
+    assert resumed.enabled is True
+    assert resumed.state == "scheduled"
     assert resumed.next_run_at is not None
 
     ran = await svc.act(USER, "run", task.id)

@@ -152,7 +152,7 @@ def _probe(path: Path) -> tuple[bool, bool, int]:
     """Single stat() → (exists, is_regular_file, size). Missing/bad → (False, …)."""
     try:
         st = path.stat()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return (False, False, 0)
     return (True, stat_module.S_ISREG(st.st_mode), st.st_size)
 
@@ -160,11 +160,7 @@ def _probe(path: Path) -> tuple[bool, bool, int]:
 def _resolve_requested_path(path_text: str, roots: list[Path]) -> Path | None:
     """Resolve a requested path, returning it only if it stays within a root."""
     raw_path = Path(path_text).expanduser()
-    candidates = (
-        [raw_path]
-        if raw_path.is_absolute()
-        else [root / raw_path for root in roots]
-    )
+    candidates = [raw_path] if raw_path.is_absolute() else [root / raw_path for root in roots]
 
     for candidate in candidates:
         resolved = candidate.resolve()

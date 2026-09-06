@@ -86,7 +86,7 @@ def _err(message: str) -> dict[str, Any]:
 
 def make_task_handler(
     chat_id: int, service: TaskService
-) -> "Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]":
+) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
     """Build the bare async tool handler bound to ``chat_id`` (unit-testable)."""
 
     async def handle(args: dict[str, Any]) -> dict[str, Any]:
@@ -104,9 +104,7 @@ def make_task_handler(
                     name=str(args.get("name") or ""),
                 )
                 log.info("agent created task %s for chat %s", created.id, chat_id)
-                return _ok(
-                    {"task": _fmt_task(created), "message": f"Task {created.id} scheduled."}
-                )
+                return _ok({"task": _fmt_task(created), "message": f"Task {created.id} scheduled."})
             if action == "list":
                 tasks = await service.list(chat_id)
                 return _ok({"tasks": [_fmt_task(t) for t in tasks]})

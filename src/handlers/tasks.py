@@ -76,9 +76,7 @@ def _render_table(ctx: BotContext, tasks: list[Task]) -> str:
             status = tr.t("task_state_running")
         else:
             status = state_label.get(t.state, t.state)
-        rows.append(
-            f"| {_cell(name)} | {_cell(t.schedule.display)} | {nxt} | {status} |"
-        )
+        rows.append(f"| {_cell(name)} | {_cell(t.schedule.display)} | {nxt} | {status} |")
     table = f"{tr.t('task_table_title')}\n\n{head}\n" + "\n".join(rows)
     return f"{table}\n\n{tr.t('task_legend')}"
 
@@ -126,11 +124,7 @@ async def tasks_cmd(
     if ctx.task_service is None:
         await send_md(message, ctx.tr.t("task_disabled"))
         return
-    tasks = [
-        t
-        for t in await ctx.task_service.list(chat_id)
-        if t.state not in _ARCHIVED_STATES
-    ]
+    tasks = [t for t in await ctx.task_service.list(chat_id) if t.state not in _ARCHIVED_STATES]
     if not tasks:
         await send_md(message, ctx.tr.t("task_list_empty"))
         return
@@ -244,9 +238,7 @@ async def _add(
 
     cl.info("task created %s kind=%s scope=%s", task.id, task.kind, task.scope)
     key = "task_global_created" if task.scope == "global" else "task_created"
-    await send_md(
-        message, ctx.tr.t(key, id=task.id, schedule=task.schedule.display)
-    )
+    await send_md(message, ctx.tr.t(key, id=task.id, schedule=task.schedule.display))
 
 
 async def _list(ctx: BotContext, message: Message, chat_id: int) -> None:

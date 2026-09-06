@@ -88,8 +88,7 @@ def attach_task_log(
     handler.addFilter(TaskLogFilter(bot_name))
     handler.setFormatter(
         logging.Formatter(
-            "%(asctime)s %(levelname)s %(name)s [bot=%(bot_name)s task=%(task_id)s]: "
-            "%(message)s"
+            "%(asctime)s %(levelname)s %(name)s [bot=%(bot_name)s task=%(task_id)s]: %(message)s"
         )
     )
     for name in logger_names:

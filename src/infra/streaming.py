@@ -74,9 +74,7 @@ class DraftStreamer:
         """Return a debug representation showing the draft interval."""
         return f"DraftStreamer(interval={self._interval})"
 
-    async def stream(
-        self, chat_id: int, chunks: AsyncIterator[StreamChunk]
-    ) -> str:
+    async def stream(self, chat_id: int, chunks: AsyncIterator[StreamChunk]) -> str:
         """Consume reply chunks, push throttled drafts, and return the full text.
 
         Draft sends are best-effort: a failed ``sendRichMessageDraft`` is logged

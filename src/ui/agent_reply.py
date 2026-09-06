@@ -123,9 +123,7 @@ async def reply_with_agent(
                 timeout=ctx.cfg.agent_timeout_sec,
             )
         except TimeoutError:
-            ctx.glog.warning(
-                "[%s] agent timeout (chat_id=%s)", ctx.cfg.name, message.chat.id
-            )
+            ctx.glog.warning("[%s] agent timeout (chat_id=%s)", ctx.cfg.name, message.chat.id)
             cl.warning("agent timeout after %ss", ctx.cfg.agent_timeout_sec)
             await send_md(
                 message,
@@ -143,18 +141,14 @@ async def reply_with_agent(
         except Exception as e:
             ctx.glog.exception("[%s] agent error", ctx.cfg.name)
             cl.exception("agent error: %s", e)
-            await send_md(
-                message, ctx.tr.t("error_internal", error=type(e).__name__)
-            )
+            await send_md(message, ctx.tr.t("error_internal", error=type(e).__name__))
             return
         await _name_session_in_background(ctx, message.chat.id, user_text, cl)
         final = answer.strip() or ctx.tr.t("empty_answer")
         delivery = parse_file_delivery(final)
         if delivery is not None:
             roots = [
-                path
-                for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir)
-                if path is not None
+                path for path in (ctx.cfg.working_dir, ctx.cfg.uploads_dir) if path is not None
             ]
             cl.info(
                 "bot file delivery: %d file(s)",

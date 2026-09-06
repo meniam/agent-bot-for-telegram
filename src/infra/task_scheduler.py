@@ -118,9 +118,7 @@ class TaskScheduler:
             if caught is None:
                 return  # infinite loop returned cleanly — shouldn't happen, no-op
             exc = caught
-        self._glog.error(
-            "[%s] task scheduler loop died: %r", self._cfg.name, exc
-        )
+        self._glog.error("[%s] task scheduler loop died: %r", self._cfg.name, exc)
         if self._on_loop_death is not None:
             with contextlib.suppress(RuntimeError):
                 asyncio.get_running_loop().create_task(self._notify_death(exc))
@@ -133,9 +131,7 @@ class TaskScheduler:
         try:
             await notifier(exc)
         except Exception:
-            self._glog.exception(
-                "[%s] scheduler loop-death notify failed", self._cfg.name
-            )
+            self._glog.exception("[%s] scheduler loop-death notify failed", self._cfg.name)
 
     async def _loop(self) -> None:
         """Tick forever, sleeping ``tick_interval`` between passes.
@@ -169,9 +165,7 @@ class TaskScheduler:
             if task.id in self._running:
                 continue
             recurring = task.schedule.kind != "once"
-            has_future_run = (
-                task.next_run_at is not None and task.next_run_at > now
-            )
+            has_future_run = task.next_run_at is not None and task.next_run_at > now
             updates: dict[str, object] = {
                 "state": "error",
                 "last_status": "error",
@@ -203,9 +197,7 @@ class TaskScheduler:
         except Exception:
             # A heartbeat write must never take the loop down; staleness will
             # surface the problem via the healthcheck instead.
-            self._glog.warning(
-                "[%s] heartbeat write failed", self._cfg.name, exc_info=True
-            )
+            self._glog.warning("[%s] heartbeat write failed", self._cfg.name, exc_info=True)
 
     def _write_heartbeat_sync(self, stamp: str) -> None:
         """Atomically replace the heartbeat file (temp + rename, no fsync).
@@ -402,17 +394,13 @@ class TaskScheduler:
                 update={"state": "running", "next_run_at": None, "last_error": None}
             )
         nxt = compute_next_run(task.schedule, last_run=now, now=now)
-        return task.model_copy(
-            update={"state": "running", "next_run_at": nxt, "last_error": None}
-        )
+        return task.model_copy(update={"state": "running", "next_run_at": nxt, "last_error": None})
 
     def _finalize_after_run(
         self, task: Task, status: str, error: str | None, now: datetime
     ) -> Task:
         """Record run outcome and settle terminal state (completed / repeat)."""
-        repeat = task.repeat.model_copy(
-            update={"completed": task.repeat.completed + 1}
-        )
+        repeat = task.repeat.model_copy(update={"completed": task.repeat.completed + 1})
         updates: dict[str, object] = {
             "last_run_at": now,
             "last_status": status,

@@ -139,7 +139,7 @@ class TaskStore:
         try:
             with path.open(encoding="utf-8") as f:
                 data = json.load(f)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             self._quarantine(path)
             return []
         if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
@@ -163,11 +163,7 @@ class TaskStore:
 
     def _all_files(self) -> list[Path]:
         """Return all top-level definition files (sorted; excludes subdirs)."""
-        return sorted(
-            p
-            for p in self._base.glob("*.json")
-            if p.parent == self._base
-        )
+        return sorted(p for p in self._base.glob("*.json") if p.parent == self._base)
 
     # ----- reads (no lock; atomic replace guarantees whole files) ----------
     #
@@ -182,9 +178,7 @@ class TaskStore:
         tasks.sort(key=lambda t: t.created_at, reverse=True)
         return tasks
 
-    async def list_all(
-        self, chat_id: int, *, include_global: bool = False
-    ) -> list[Task]:
+    async def list_all(self, chat_id: int, *, include_global: bool = False) -> list[Task]:
         """List a chat's own user tasks, newest first (by ``created_at``).
 
         When ``include_global`` is set, global tasks are folded in as well (for
@@ -335,7 +329,7 @@ class TaskStore:
             try:
                 with path.open(encoding="utf-8") as f:
                     events.append(TaskAuditEvent.model_validate(json.load(f)))
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 log.warning("task store: skipping invalid audit event %s", path)
         return events
 
@@ -343,9 +337,7 @@ class TaskStore:
         """Return a task's non-execution audit events oldest-first."""
         return await asyncio.to_thread(self._list_audit_events_sync, task_id)
 
-    def _copy_transcript_sync(
-        self, task_id: str, started_at: datetime, src: Path
-    ) -> Path | None:
+    def _copy_transcript_sync(self, task_id: str, started_at: datetime, src: Path) -> Path | None:
         if not src.is_file():
             log.warning("task store: transcript not found, skipping copy: %s", src)
             return None
@@ -365,14 +357,10 @@ class TaskStore:
             raise
         return dst
 
-    async def copy_transcript(
-        self, task_id: str, started_at: datetime, src: Path
-    ) -> Path | None:
+    async def copy_transcript(self, task_id: str, started_at: datetime, src: Path) -> Path | None:
         """Copy the run's SDK jsonl transcript next to its record; return its path."""
         async with self._lock:
-            return await asyncio.to_thread(
-                self._copy_transcript_sync, task_id, started_at, src
-            )
+            return await asyncio.to_thread(self._copy_transcript_sync, task_id, started_at, src)
 
     def _list_history_sync(self, task_id: str) -> list[TaskRun]:
         hdir = self._history_dir(task_id)
@@ -383,7 +371,7 @@ class TaskStore:
             try:
                 with path.open(encoding="utf-8") as f:
                     runs.append(TaskRun.model_validate(json.load(f)))
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 log.warning("task store: skipping invalid history record %s", path)
         return runs
 
