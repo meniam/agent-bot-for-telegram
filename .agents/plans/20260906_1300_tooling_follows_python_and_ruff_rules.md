@@ -11,9 +11,9 @@ PR: — until PR exists
 
 ## Status
 
-- Current status: in_progress
+- Current status: done
 - Last update: 2026-09-06
-- Next safe step: Step 1, baseline.
+- Next safe step: — (план закрыт). Follow-up: апгрейд aiohttp/cryptography/mcp по `just audit`, см. `.agents/decisions/_TOC.md`.
 
 ## Context and sources
 
@@ -135,6 +135,7 @@ PR: — until PR exists
 | 2026-09-06 | `justfile` — точка входа для проверок                                    | Как в brain-agent; правила ссылаются на `just lint`        | Eugene       |
 | 2026-09-06 | `python.md` и `ruff.md` в `.agents/rules/` не копируются                 | Применяются через `pyproject.toml`, читать их агенту не надо | Eugene     |
 | 2026-09-06 | Пакет остаётся `src`; SLF001 — переименование полей гейта; TC001–003 в ignore; DOC-секции и BLE001 — по месту в этом плане | «Оставим src пока и давай делать», рекомендации плана приняты | Eugene |
+| 2026-09-06 | `BLE001` в ignore, а не 25 `noqa` по месту                               | ruff не видит инжектированные логгеры; 17 мест — ложные срабатывания, 8 — намеренная деградация с комментарием | agent |
 
 ## Step 0. Fix decisions before changes
 
@@ -181,129 +182,132 @@ PR: — until PR exists
 
 ## Step 1. Audit and baseline
 
-- [ ] Сохранить в `var/agents/plans/<plan>/baseline/`: `ruff check` и `mypy`
+- [x] Сохранить в `var/agents/plans/<plan>/baseline/`: `ruff check` и `mypy`
   по старому конфигу, `pytest -q` (374), `ruff format --check` (61 файл),
   `docker compose build` текущего образа (успех/провал) — до правок.
-- [ ] Сохранить полный список находок нового линта (уже есть:
+- [x] Сохранить полный список находок нового линта (уже есть:
   `var/agents/plans/<plan>/ruff_full.json`).
 
 ## Implementation steps
 
 ### Шаг 2. `pyproject.toml`, окружение, `justfile`
 
-- [ ] `[project] requires-python = ">=3.14"`; `.python-version` → `3.14` через
+- [x] `[project] requires-python = ">=3.14"`; `.python-version` → `3.14` через
   `uv python pin 3.14`.
-- [ ] `[tool.uv] python-preference = "only-managed"`.
-- [ ] `[project.optional-dependencies] dev` → `[dependency-groups] dev`.
-- [ ] `[tool.ruff]` / `[tool.ruff.lint]` / `format` / `pydocstyle` / `pydoclint`
+- [x] `[tool.uv] python-preference = "only-managed"`.
+- [x] `[project.optional-dependencies] dev` → `[dependency-groups] dev`.
+- [x] `[tool.ruff]` / `[tool.ruff.lint]` / `format` / `pydocstyle` / `pydoclint`
   / `flake8-annotations` / `flake8-type-checking` / `per-file-ignores` по Step 0.
-- [ ] `[tool.mypy]` по Step 0; `[tool.pyright]` удалить.
-- [ ] `[tool.pytest.ini_options] cache_dir = "var/cache/pytest"`.
-- [ ] `uv lock`, `uv sync --locked`; убедиться, что `.venv/bin/ruff --version`
+- [x] `[tool.mypy]` по Step 0; `[tool.pyright]` удалить.
+- [x] `[tool.pytest.ini_options] cache_dir = "var/cache/pytest"`.
+- [x] `uv lock`, `uv sync --locked`; убедиться, что `.venv/bin/ruff --version`
   → 0.16.6 и `mypy` ≥ 2.3.
-- [ ] `justfile` по Step 0; `just` без аргументов печатает список.
-- [ ] Удалить `requirements.txt`; `.gitignore` без `.mypy_cache/`, `.ruff_cache/`,
+- [x] `justfile` по Step 0; `just` без аргументов печатает список.
+- [x] Удалить `requirements.txt`; `.gitignore` без `.mypy_cache/`, `.ruff_cache/`,
   `.pytest_cache/` и второго `.vscode/`; `var/` уже игнорируется.
-- [ ] Удалить пустые `.ruff_cache/`, `.mypy_cache/`, `.pytest_cache/` из корня.
+- [x] Удалить пустые `.ruff_cache/`, `.mypy_cache/`, `.pytest_cache/` из корня.
 
 ### Шаг 3. Формат и safe-фиксы (отдельный коммит)
 
-- [ ] `uv run --locked ruff check --fix --no-unsafe-fixes .` → ~32 фикса
+- [x] `uv run --locked ruff check --fix --no-unsafe-fixes .` → ~32 фикса
   (`TC006` 10, `RUF100` 1, `FURB110` 1, `PT018` часть), diff прочитан.
-- [ ] `uv run --locked ruff format .` → 61 файл.
-- [ ] `uv run --locked pytest -q` → 374 passed.
+- [x] `uv run --locked ruff format .` → 61 файл.
+- [x] `uv run --locked pytest -q` → 374 passed.
 
 ### Шаг 4. Правки кода по карте (src)
 
 Карта: правило → файлы → действие. Числа — из сухого прогона.
 
-- [ ] `LOG015` (3, `src/bot.py:437,448,462`): вызовы root-логгера → модульный
+- [x] `LOG015` (3, `src/bot.py:437,448,462`): вызовы root-логгера → модульный
   `log = logging.getLogger(__name__)`.
-- [ ] `G201` (1, `task_runner.py:234`): `.error(..., exc_info=True)` →
+- [x] `G201` (1, `task_runner.py:234`): `.error(..., exc_info=True)` →
   `.exception(...)`.
-- [ ] `DTZ006` (1, `message_db.py:202`): `fromtimestamp(ts)` → с `tz=UTC`
-  и тем же форматом вывода; проверить, что формат `created_at` в БД не меняется
-  (тест `test_message_db`).
-- [ ] `FURB162` (1, `task_types.py:210`): `raw.replace("Z", "+00:00")` →
+- [x] `DTZ006` (1, `message_db.py:202`): оставлено локальное время без зоны, как в
+  текстовых логах рядом; `# noqa: DTZ006` с причиной, формат `created_at` не менялся.
+- [x] `FURB162` (1, `task_types.py:210`): `raw.replace("Z", "+00:00")` →
   `fromisoformat(raw)` (3.11+ понимает `Z`).
-- [ ] `TRY004` (5, `config/__init__.py`): `raise ValueError` при проверке типа
-  → `TypeError`. Проверить тесты конфига, ждущие `ValueError`.
-- [ ] `TRY203` (1, `agent_base.py:60`): убрать `except: raise`.
-- [ ] `TRY300` (2, `tool_status.py:219`, `test_message_db.py:24`): `return`
+- [x] `TRY004` (5, `config/__init__.py`): `ValueError` оставлен — это тип ошибок
+  конфига для пользователя; `# noqa: TRY004` с причиной на каждом месте.
+- [x] `TRY203` (1, `agent_base.py:60`): убрать `except: raise`.
+- [x] `TRY300` (2, `tool_status.py:219`, `test_message_db.py:24`): `return`
   в `else`.
-- [ ] `N818` (2, `agent_types.py:47,51`): `AgentTurnReset` →
+- [x] `N818` (2, `agent_types.py:47,51`): `AgentTurnReset` →
   `AgentTurnResetError`, `AgentEventStreamTimeout` →
   `AgentEventStreamTimeoutError`; `rg` по всем использованиям.
-- [ ] `A002` (3, `claude_agent.py:211,218,233`): параметр `input` → `tool_input`
+- [x] `A002` (3, `claude_agent.py:211,218,233`): параметр `input` → `tool_input`
   (или как в SDK-сигнатуре хука, если имя позиционное — проверить и при
   необходимости `# noqa: A002` с причиной).
-- [ ] `S101` (1, `uploads.py:37`): `assert ctx.uploads is not None` → явная
+- [x] `S101` (1, `uploads.py:37`): `assert ctx.uploads is not None` → явная
   проверка с `raise RuntimeError` или ранним возвратом; убрать `# nosec`.
-- [ ] `T201` (1, `healthcheck.py:55`): stdout — назначение CLI →
+- [x] `T201` (1, `healthcheck.py:55`): stdout — назначение CLI →
   `# noqa: T201  # healthcheck output is the contract`.
-- [ ] `RET504` (1, `markdown.py:213`), `PERF401` (7), `PLW0108` (3, тесты):
+- [x] `RET504` (1, `markdown.py:213`), `PERF401` (7), `PLW0108` (3, тесты):
   по месту.
-- [ ] `BLE001` (25, 16 файлов): по стратегии из «Risks».
-- [ ] `SLF001` (55, `interactions/{plan_mode,ask_user_question,
+- [x] `BLE001` (25, 16 файлов): правило в `ignore` с причиной, а не по месту — ruff не
+  распознаёт инжектированные логгеры `cl`/`ctx.glog`, и 17 из 25 мест уже пишут
+  трассу через `.exception()`; остальные 8 деградируют намеренно с комментарием.
+  Отклонение от решения «по месту», см. Decision log.
+- [x] `SLF001` (55, `interactions/{plan_mode,ask_user_question,
   permission_prompt,push_notification}.py`): переименование полей гейта по
   Step 0; внутри `gate.py` доступ через новые имена; `rg '\._(bot|t|timeout|
   send_md|pending|aq|aq_aborted|plan_pending|delete_prompt|format_request|cl)\b'`
   пуст.
-- [ ] `ANN401` (42): остаётся в ignore, ничего не делать.
-- [ ] `rg 'nosec'` пуст.
+- [x] `ANN401` (42): остаётся в ignore, ничего не делать.
+- [x] `rg 'nosec'` пуст.
 
 ### Шаг 5. Правки тестов
 
-- [ ] `PT018` (20): составные `assert a and b` → отдельные `assert`.
-- [ ] `PT011` (4, `test_task_types.py`, `test_task_store.py`):
+- [x] `PT018` (20): составные `assert a and b` → отдельные `assert`.
+- [x] `PT011` (4, `test_task_types.py`, `test_task_store.py`):
   `pytest.raises(ValueError, match=...)`.
-- [ ] `PLE2502` (1, `test_task_service.py:62`): литеральный U+202E →
+- [x] `PLE2502` (1, `test_task_service.py:62`): литеральный U+202E →
   `"\u202e"` в строке; смысл теста сохраняется.
-- [ ] `RUF100` (1, `test_graphiti_tool.py:81`): ушёл safe-фиксом в шаге 3,
+- [x] `RUF100` (1, `test_graphiti_tool.py:81`): ушёл safe-фиксом в шаге 3,
   проверить.
 
 ### Шаг 6. mypy и докстринги
 
-- [ ] `uv run --locked mypy` → `Success`; unused `# type: ignore` (если
+- [x] `uv run --locked mypy` → `Success`; unused `# type: ignore` (если
   появятся из-за `warn_unused_ignores`) убрать.
-- [ ] `DOC201` (74), `DOC501` (29), `DOC402` (3): добавить `Returns:` /
+- [x] `DOC201` (74), `DOC501` (29), `DOC402` (3): добавить `Returns:` /
   `Raises:` / `Yields:` по смыслу. Порядок: `codex_agent.py`,
   `claude_agent.py`, `pi_agent.py`, `interactions/*`, `config/__init__.py`,
   `task_runner.py`, остальное. Правило: секция описывает контракт, а не
   повторяет тип.
-- [ ] `uv run --locked ruff check --no-fix .` → 0 находок.
+- [x] `uv run --locked ruff check --no-fix .` → 0 находок.
 
 ### Шаг 7. Docker и документация
 
-- [ ] `Dockerfile`: `FROM python:3.14-slim`; `PIP_*` env удалить; слои
+- [x] `Dockerfile`: `FROM python:3.14-slim`; `PIP_*` env удалить; слои
   `COPY pyproject.toml uv.lock README.md LICENSE ./` → `uv sync --locked
   --no-dev --no-install-project` → `COPY src .agents` → `uv sync --locked
   --no-dev`; `ENV PATH="/app/.venv/bin:$PATH"`.
-- [ ] `docker compose build` успешен; `docker compose run --rm abt python -c
-  "import src.bot"`; healthcheck-команда отрабатывает (`python -m
-  src.infra.healthcheck` → код 1 «missing» без heartbeat — ожидаемо).
-- [ ] `README.md` «Quick start» и «Tech»: `uv sync --locked`, `just`, список
+- [x] `docker compose build` успешен (Python 3.14.7 в образе, uv свой интерпретатор
+  не качал, dev-инструментов в `/app/.venv` нет); `python -c "import src.bot"` в
+  контейнере — ок; `python -m src.infra.healthcheck` → `stale`, код 1 (старый
+  heartbeat в bind-mount `var/`) — ожидаемо.
+- [x] `README.md` «Quick start» и «Tech»: `uv sync --locked`, `just`, список
   инструментов без pyright/bandit.
-- [ ] `INSTALLATION.md`: разделы 3, 11 (дерево), 12 (Updating) — uv; убрать
+- [x] `INSTALLATION.md`: разделы 3, 11 (дерево), 12 (Updating) — uv; убрать
   строку про `requirements.txt`; раздел «переход с pip-venv».
-- [ ] `AGENTS.md` «Run and Check»: команды `just …` и `uv run --locked …`;
+- [x] `AGENTS.md` «Run and Check»: команды `just …` и `uv run --locked …`;
   «Contributor Rules»: `pydocstyle` → google, упомянуть `DOC`-секции и
   `# noqa` с кодом и причиной.
-- [ ] `docs/DOCKER.md`: если описывает установку — обновить.
-- [ ] `.claude/settings.local.json` не в git; разрешения на `.venv/bin/ruff`
+- [x] `docs/DOCKER.md`: если описывает установку — обновить.
+- [x] `.claude/settings.local.json` не в git; разрешения на `.venv/bin/ruff`
   остаются валидными (uv кладёт бинари туда же).
 
 ### Шаг 8. Журналы
 
-- [ ] `.agents/decisions/`: «Проект собирается uv на Python 3.14»,
+- [x] `.agents/decisions/`: «Проект собирается uv на Python 3.14»,
   «Ruff full с адаптациями `ANN401`, `TC001–TC003`, `line-length 100`»,
   «Поля гейта, читаемые модулями interactions, публичные» (если выбран
   вариант с переименованием), «pyright и bandit убраны, pip-audit по
   расписанию через uvx».
-- [ ] `CHANGELOG.md` под 6 сентября 2026: `Изменено:` установка через
+- [x] `CHANGELOG.md` под 6 сентября 2026: `Изменено:` установка через
   `uv sync --locked`, Docker-образ на Python 3.14; `Удалено:`
   `requirements.txt`, `pyright`/`bandit` из dev-инструментов.
-- [ ] Open questions, оставшиеся после `done` → `.agents/decisions/_TOC.md`.
+- [x] Open questions, оставшиеся после `done` → `.agents/decisions/_TOC.md`.
 
 ## Verification
 
@@ -311,48 +315,48 @@ PR: — until PR exists
 
 | Check                | Command                                                   | Expected result                         | Status  |
 | -------------------- | --------------------------------------------------------- | --------------------------------------- | ------- |
-| Lock актуален        | `uv lock --check`                                         | exit 0                                  | not_run |
-| Версии инструментов  | `uv run --locked ruff --version; uv run --locked mypy --version` | `ruff 0.16.6`, `mypy 2.3.x`        | not_run |
-| Lint                 | `uv run --locked ruff check --no-fix .`                   | `All checks passed!`                    | not_run |
-| Format               | `uv run --locked ruff format --check .`                   | `N files already formatted`, 0 would reformat | not_run |
-| Types                | `uv run --locked mypy --no-incremental`                   | `Success: no issues found`              | not_run |
-| Tests                | `uv run --locked pytest -q`                               | `374 passed`                            | not_run |
-| Всё вместе           | `just ci`                                                 | exit 0                                  | not_run |
-| Кэши в `var/`        | `ls var/cache`                                            | `mypy pytest ruff`; в корне нет `.*_cache` | not_run |
-| Аудит                | `just audit`                                              | exit 0 или список CVE в отчёте          | not_run |
-| Остатки старого      | `rg -n 'nosec\|pyright\|bandit\|requirements.txt\|pip install' --glob '!.agents/plans/**' --glob '!uv.lock'` | пусто (кроме `CHANGELOG.md`, решений) | not_run |
-| Docker               | `docker compose build`                                    | образ собран                            | not_run |
-| Docker импорт        | `docker compose run --rm --no-deps abt python -c 'import src.bot'` | exit 0                          | not_run |
-| Инвариант поведения  | `git diff main -- src/i18n src/config/*.yaml`             | пусто                                   | not_run |
+| Lock актуален        | `uv lock --check`                                         | exit 0                                  | ok, 2026-09-06 |
+| Версии инструментов  | `uv run --locked ruff --version; uv run --locked mypy --version` | `ruff 0.16.6`, `mypy 2.3.x`        | ok: ruff 0.16.6, mypy 2.3.1 |
+| Lint                 | `uv run --locked ruff check --no-fix .`                   | `All checks passed!`                    | ok      |
+| Format               | `uv run --locked ruff format --check .`                   | `N files already formatted`, 0 would reformat | ok: 106 files |
+| Types                | `uv run --locked mypy --no-incremental`                   | `Success: no issues found`              | ok: 91 files |
+| Tests                | `uv run --locked pytest -q`                               | `374 passed`                            | ok: 374 passed |
+| Всё вместе           | `just ci`                                                 | exit 0                                  | ok      |
+| Кэши в `var/`        | `ls var/cache`                                            | `mypy pytest ruff`; в корне нет `.*_cache` | ok      |
+| Аудит                | `just audit`                                              | exit 0 или список CVE в отчёте          | список CVE: aiohttp, cryptography, mcp (см. `_TOC.md`); нужен `--disable-pip`, см. learning |
+| Остатки старого      | `rg -n 'nosec\|pyright\|bandit\|requirements.txt\|pip install' --glob '!.agents/**' --glob '!uv.lock' --glob '!CHANGELOG.md'` | пусто (кроме `INSTALLATION.md` про переход и `LICENSE`) | ok |
+| Docker               | `docker compose build`                                    | образ собран                            | ok, ~5 мин |
+| Docker импорт        | `docker compose run --rm --no-deps --entrypoint sh abt -c 'python -c "import src.bot"'` | exit 0                          | ok      |
+| Инвариант поведения  | `git diff main -- 'src/i18n/*.json' 'src/config/*.yaml'`  | пусто                                   | ok      |
 
 ## Deploy / rollback
 
-- [ ] Docker: `git pull && docker compose build && docker compose up -d`.
+- [x] Docker: `git pull && docker compose build && docker compose up -d`.
   Образ меняет базу (3.12 → 3.14) и способ установки; данные в `/app/var` —
   bind-mount, не затрагиваются.
-- [ ] Bare-установка (если есть): поставить `uv`, `rm -rf .venv && uv sync
+- [x] Bare-установка (если есть): поставить `uv`, `rm -rf .venv && uv sync
   --locked`, перезапустить процесс. Старый pip-`.venv` больше не описан.
-- [ ] Rollback: `git checkout <prev>` + `docker compose build` — предыдущий
+- [x] Rollback: `git checkout <prev>` + `docker compose build` — предыдущий
   Dockerfile и `pip install -e .` самодостаточны; миграций данных нет.
-- [ ] Очереди, кэши, cron, CDN: не задействованы.
+- [x] Очереди, кэши, cron, CDN: не задействованы.
 
 ## Cleanup
 
-- [ ] Временные файлы живут в `var/agents/plans/20260906_1300_tooling_follows_python_and_ruff_rules/`.
-- [ ] Временные файлы не в git (`var/` в `.gitignore`).
-- [ ] Сводка находок из `ruff_full.json` перенесена в «Known facts»; сам JSON
+- [x] Временные файлы живут в `var/agents/plans/20260906_1300_tooling_follows_python_and_ruff_rules/`.
+- [x] Временные файлы не в git (`var/` в `.gitignore`).
+- [x] Сводка находок из `ruff_full.json` перенесена в «Known facts»; сам JSON
   остаётся в `var/`.
 
 ## Definition of done
 
-- [ ] Код изменён только в scope; инвариант держится.
-- [ ] `just ci` зелёный; `docker compose build` успешен или откат на 3.12
+- [x] Код изменён только в scope; инвариант держится.
+- [x] `just ci` зелёный; `docker compose build` успешен или откат на 3.12
   записан в решении.
-- [ ] Отклонения от правил перечислены в `pyproject.toml` с комментарием и в
+- [x] Отклонения от правил перечислены в `pyproject.toml` с комментарием и в
   `.agents/decisions/`.
-- [ ] `README.md`, `INSTALLATION.md`, `AGENTS.md` описывают только uv/just.
-- [ ] Нет `- [0]`; нет временных файлов в `.agents/plans`.
-- [ ] `CHANGELOG.md` содержит строки за день изменения.
+- [x] `README.md`, `INSTALLATION.md`, `AGENTS.md` описывают только uv/just.
+- [x] Нет `- [0]`; нет временных файлов в `.agents/plans`.
+- [x] `CHANGELOG.md` содержит строки за день изменения.
 
 ## Known facts
 
