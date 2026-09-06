@@ -17,4 +17,3 @@ Index of `.agents/decisions/`. Rules: `decisions.md`.
 ## Open questions
 
 - `aiogram==3.29.0` в `uv.lock` отозван с PyPI (yanked: «Severe slowdown on parsing nested RichBlock entities»); нужен ли апгрейд aiogram отдельной задачей?
-- Как развёрнут сервер: только Docker или есть установка в `.venv` без контейнера? От этого зависит, нужен ли на сервере `uv`.

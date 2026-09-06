@@ -110,6 +110,12 @@ uv run --locked pytest -q
 runs `pip-audit` over the locked dependency export via `uvx`. Never run
 `ruff --unsafe-fixes` as an agent. Tool caches live under `var/cache/`.
 
+Production is not deployed from this repo. The sibling `brain-abt` repository
+holds the overlay (compose, `.env`, real config, commands) and `just deploy` /
+`just deploy-build`, which pull `origin/main` of this repo on the server and
+run the Docker stack. Push here first; a change to `pyproject.toml`, `uv.lock`
+or the Dockerfile needs `deploy-build`.
+
 For behavior that unit tests do not cover, run the bot and inspect
 `logs/<internal_name>/bot.log` plus the relevant per-chat `<chat_id>.log`.
 
