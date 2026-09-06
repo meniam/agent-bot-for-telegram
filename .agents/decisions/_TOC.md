@@ -13,5 +13,5 @@ Index of `.agents/decisions/`. Rules: `../rules/decisions.md`.
 
 ## Open questions
 
-- `just audit` (2026-09-06) нашёл CVE в запиненных зависимостях: aiohttp 3.14.1 (PYSEC-2026-3546/3547 → 3.14.2), cryptography 49.0.0 (PYSEC-2026-3552 → 50.0.0), mcp 1.28.0 (PYSEC-2026-3483 → 1.28.1); апгрейд — отдельным коммитом через `uv lock --upgrade-package`.
+- `aiogram==3.29.0` в `uv.lock` отозван с PyPI (yanked: «Severe slowdown on parsing nested RichBlock entities»); нужен ли апгрейд aiogram отдельной задачей?
 - Как развёрнут сервер: только Docker или есть установка в `.venv` без контейнера? От этого зависит, нужен ли на сервере `uv`.

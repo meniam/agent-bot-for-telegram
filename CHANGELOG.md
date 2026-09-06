@@ -7,6 +7,9 @@
 
 ## 6 сентября 2026, Воскресенье
 
+- Безопасность: обновлены aiohttp 3.14.1 → 3.14.3 (PYSEC-2026-3546, PYSEC-2026-3547),
+  cryptography 49.0.0 → 50.0.1 (PYSEC-2026-3552), mcp 1.28.0 → 1.29.1
+  (PYSEC-2026-3483); `just audit` чист. Пересоберите Docker-образ.
 - Изменено: установка проекта — `uv sync --locked` на Python 3.14 вместо
   `python3 -m venv` + `pip install -e ".[dev]"`; старое окружение удалить
   (`rm -rf .venv`) ([решение](.agents/decisions/20260906_1323_project_runs_on_uv_with_python_314.md)).

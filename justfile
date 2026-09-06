@@ -44,7 +44,7 @@ audit:
     set -eu
     audit_requirements=$(mktemp)
     trap 'rm -f "$audit_requirements"' EXIT
-    uv export --locked --format requirements-txt --all-groups --no-emit-project --output-file "$audit_requirements"
+    uv export --locked --format requirements-txt --all-groups --no-emit-project --quiet --output-file "$audit_requirements"
     uvx pip-audit --disable-pip -r "$audit_requirements"
 
 # Run the bot from the project environment.
