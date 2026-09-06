@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Multi-bot Telegram agent gateway for Claude, Codex, and PI.dev backends"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "claude-agent-sdk>=0.1.0,<0.2",
     # In-process SDK MCP tools need mcp 1.x; the 2.0 alpha drops Server.list_tools.
@@ -26,72 +26,103 @@ dependencies = [
     "croniter>=2.0,<7",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "ruff>=0.6",
-    "mypy>=1.10",
-    "pyright>=1.1",
-    "pip-audit>=2.7",
-    "bandit>=1.7",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-]
-
 [project.scripts]
 abt = "src.bot:_cli"
+
+[dependency-groups]
+dev = [
+    # Exact pin: the lint config below selects preview rules by code.
+    "ruff==0.16.6",
+    "mypy>=2.3",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "types-PyYAML",
+    "types-croniter",
+]
+
+[tool.uv]
+python-preference = "only-managed"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
 [tool.ruff]
-target-version = "py311"
+cache-dir = "var/cache/ruff"
+# 100 instead of the default 88: SDK-typed signatures and aiogram handler
+# annotations wrap badly at 88.
 line-length = 100
+force-exclude = true
+extend-exclude = [".agents"]
+# `src` is not set: the package itself is named `src`, and ruff's default
+# (`[".", "src"]`) already resolves `src.*` as first-party.
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
 select = [
-    "E", "F", "W",   # pycodestyle / pyflakes
-    "I",             # isort
-    "B",             # bugbear
-    "UP",            # pyupgrade
-    "ASYNC",         # async pitfalls
-    "S",             # bandit-lite
-    "RUF",           # ruff-specific
-    "SIM",           # simplify
-    "PTH",           # use pathlib
-    "ANN",           # annotation completeness
-    "RET",           # explicit returns
-    "ARG",           # unused arguments
-    "TC",            # typing import hygiene
-    "D",             # pydocstyle — full docstring coverage
+    "F", "E4", "E7", "E9",
+    "B", "RUF", "PIE", "PGH004",
+    "S", "ASYNC", "DTZ",
+    "BLE", "TRY", "RSE", "RET",
+    "LOG", "G",
+    "ARG", "SLF", "A", "N",
+    "PLE", "PLW",
+    "PT", "PTH", "T20",
+    "D", "ANN",
+    "DOC102", "DOC201", "DOC202", "DOC402", "DOC403", "DOC501", "DOC502",
+    "ERA", "TD",
+    "I", "UP", "C4", "SIM", "PERF", "FURB", "TC",
 ]
 ignore = [
-    "S101",    # assert is fine for internal invariants
-    "S110",    # try/except/pass is intentional in many Telegram paths
-    "E501",    # line length handled by formatter
-    "ANN401",  # Any at SDK / JSON boundaries is intentional
-    "TC006",   # cast() quoted-string style is optional
-    "RET504",  # explicit assign-then-return is sometimes clearer
+    "D105",    # magic methods: the name is the contract
+    "D107",    # __init__: documented in the class docstring
+    "TRY003",  # long messages in raise are fine without EM selected
+    "RUF001",  # ambiguous unicode: test fixtures contain Russian text,
+    "RUF002",  # so Cyrillic letters are the norm, not a homoglyph attack
+    "RUF003",
+    "TD002",   # TODO author: this project has one
+    "TD003",   # TODO issue link: there is no tracker to link to
+    # Project adaptations, see .agents/decisions/.
+    "ANN401",  # `Any` at the SDK / JSON boundaries is the real type there
+    "TC001",   # On 3.14 annotations are lazy (PEP 649); moving typing-only
+    "TC002",   # imports under TYPE_CHECKING buys nothing and breaks dataclass
+    "TC003",   # and pydantic field introspection.
 ]
 
 [tool.ruff.lint.pydocstyle]
-convention = "pep257"
+convention = "google"
+
+[tool.ruff.lint.pydoclint]
+ignore-one-line-docstrings = true
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/i18n/*.json" = ["ALL"]
+"tests/**/*.py"      = ["D", "DOC", "ANN", "S101", "ARG", "SLF"]
+"src/**/__init__.py" = ["D104"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
+files = ["src", "tests"]
+cache_dir = "var/cache/mypy"
 strict = true
-warn_return_any = true
-warn_unused_ignores = true
-disallow_untyped_defs = false  # SDK hook callbacks are intentionally untyped
-ignore_missing_imports = true
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.11"
+warn_unreachable = true
+warn_unused_configs = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+]
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+cache_dir = "var/cache/pytest"
