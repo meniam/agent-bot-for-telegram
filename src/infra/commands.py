@@ -33,6 +33,9 @@ _BUILTIN_NAMES = frozenset(
     {
         "start",
         "new",
+        "sess",
+        "task",
+        "tasks",
         "context",
         "plan",
         "cancel",

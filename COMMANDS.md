@@ -12,7 +12,7 @@ Drop `*.md` files into a directory and the bot exposes each one as a Telegram bo
        commands_dir: /absolute/path/to/commands
    ```
 3. Drop one or more `*.md` files inside (see format below).
-4. Restart the bot. The startup log prints `loaded N custom command(s) from <path>` and the commands appear in the Telegram menu alongside the built-in ones (`/start`, `/new`, `/context`, `/plan`, `/cancel`, `/stop`, `/mode`, `/model`, `/mcp`, `/info`, `/whoami`, `/help`).
+4. Restart the bot. The startup log prints `loaded N custom command(s) from <path>` and the commands appear in the Telegram menu alongside the built-in ones (`/start`, `/new`, `/sess`, `/task`, `/tasks`, `/context`, `/plan`, `/cancel`, `/stop`, `/mode`, `/model`, `/mcp`, `/info`, `/whoami`, `/help`).
 
 Omitting `commands_dir` disables the feature. A non-existent directory raises a startup error.
 
@@ -28,7 +28,7 @@ Search handoff / decisions / archive for anything related to: $ARGUMENTS
 Quote at most 3 lines per match and link the source.
 ```
 
-- `name` (optional) — defaults to the file stem (`recall.md` → `recall`). Must be 1–32 chars, lowercase letters, digits and underscores, starting with a letter. Names colliding with built-ins (`start`, `new`, `context`, `plan`, `cancel`, `stop`, `mode`, `model`, `mcp`, `info`, `whoami`, `help`) or with previously-loaded commands are skipped with a warning.
+- `name` (optional) — defaults to the file stem (`recall.md` → `recall`). Must be 1–32 chars, lowercase letters, digits and underscores, starting with a letter. Names colliding with built-ins (`start`, `new`, `sess`, `task`, `tasks`, `context`, `plan`, `cancel`, `stop`, `mode`, `model`, `mcp`, `info`, `whoami`, `help`) or with previously-loaded commands are skipped with a warning.
 - `description` (optional) — defaults to `name`. Trimmed to 256 chars (the Telegram limit).
 - Frontmatter is a small `key: value` subset of YAML — no nested structures, no lists. Quotes around values are stripped. Anything outside the leading `--- ... ---` block is treated as the body.
 - Body is everything after the closing `---`. Empty bodies are rejected.

@@ -38,11 +38,12 @@ def test_invalid_name_skipped(tmp_path: Path) -> None:
 
 def test_collision_with_builtin_skipped(tmp_path: Path) -> None:
     """A command colliding with a built-in name is skipped."""
-    _write(
-        tmp_path,
-        "start.md",
-        "---\nname: start\ndescription: x\n---\nBody.",
-    )
+    for name in ("start", "sess", "task", "tasks"):
+        _write(
+            tmp_path,
+            f"{name}.md",
+            f"---\nname: {name}\ndescription: x\n---\nBody.",
+        )
     assert load_commands(tmp_path) == []
 
 
